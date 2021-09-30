@@ -216,6 +216,18 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		this.store = store;
 	}
 
+	append<Key extends keyof T>(key: Key | string, newItem: ArrayElement<T[Key] | unknown[]>): void;
+	append(key: string, newItem: unknown): void {
+		const currentItems = this.has(key) ? this.get(key) : [];
+
+		if (!Array.isArray(currentItems)) {
+			throw new TypeError('Expected target to be instance of `Array` but it is not');
+		}
+
+		// Not usin .push on purpose not to mutate old array directly. It could mess with
+		this.set(key, [...currentItems, newItem]);
+	}
+
 	/**
 	Check if an item exists.
 
