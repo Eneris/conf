@@ -224,7 +224,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			throw new TypeError('Expected target to be instance of `Array` but it is not');
 		}
 
-		// Not usin .push on purpose not to mutate old array directly. It could mess with
+		// Not using .push on purpose not to mutate old array directly. It could mess with
 		this.set(key, [...currentItems, newItem]);
 	}
 
@@ -242,16 +242,16 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	/**
-	Toggles boolean item.
+	Toggle a boolean item.
 
 	@param key - The key of the item to toggle.
-	@returns new value
+	@returns new the value after successful toggle
 	*/
 	toggle<Key extends keyof T>(key: Key | string): boolean {
 		const currentValue = this.has(key) ? this.get(key) : false;
 
 		if (typeof currentValue !== 'boolean') {
-			throw new TypeError(`Expected type to be of type \`boolean\` or empty, is ${typeof currentValue}`);
+			throw new TypeError(`Expected type to be of type \`boolean\` or empty, got ${typeof currentValue}`);
 		}
 
 		const newValue = !currentValue;
@@ -265,7 +265,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	Calls supplied mutation on the item and replaces it with its result.
 
 	@param key - The key of the item to mutate.
-	@param mutation - Function whichreturns new derived value
+	@param mutation - Function which returns new derived value
 	@returns new value
 	*/
 	mutate<Key extends keyof T>(key: Key | string, mutation: (currentValue: T[Key]) => T[Key]) {
