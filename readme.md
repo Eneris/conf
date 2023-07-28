@@ -356,6 +356,24 @@ The `value` must be JSON serializable. Trying to set the type `undefined`, `func
 
 Set multiple items at once.
 
+#### .toggle(key)
+
+Toggle boolean item
+
+Type of the item must be `boolean` or be empty. Trying to toggle different type will result in TypeError.
+
+Returns the new value after successful toggle.
+
+#### .append(key, value)
+
+Append the given value to the array.
+
+Type of the item must be `array`. Trying to append into different type will result in TypeError.
+
+#### .mutate(key, mutation)
+
+Calls supplied mutation on the item and replaces it with its result.
+
 #### .get(key, defaultValue?)
 
 Get an item or `defaultValue` if the item does not exist.
