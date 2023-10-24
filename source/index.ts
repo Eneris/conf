@@ -1,9 +1,8 @@
-/* eslint-disable @typescript-eslint/naming-convention, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-redundant-type-constituents */
+/* eslint-disable @typescript-eslint/naming-convention, @typescript-eslint/no-unsafe-return */
 import process from 'node:process';
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert';
-import {EventEmitter} from 'node:events';
 import {getProperty, hasProperty, setProperty, deleteProperty} from 'dot-prop';
 import envPaths from 'env-paths';
 import {writeFileSync as atomicWriteFileSync} from 'atomically';
@@ -55,7 +54,7 @@ const MIGRATION_KEY = `${INTERNAL_KEY}.migrations.version`;
 
 export default class Conf<T extends Record<string, any> = Record<string, unknown>> implements Iterable<[keyof T, T[keyof T]]> {
 	readonly path: string;
-	readonly events: EventEmitter;
+	readonly events: EventTarget;
 	readonly #validator?: AjvValidateFunction;
 	readonly #options: Readonly<Partial<Options<T>>>;
 	readonly #defaultValues: Partial<T> = {};
@@ -127,7 +126,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			this._deserialize = options.deserialize;
 		}
 
-		this.events = new EventEmitter();
+		this.events = new EventTarget();
 
 		const fileExtension = options.fileExtension ? `.${options.fileExtension}` : '';
 		this.path = path.resolve(options.cwd, `${options.configName ?? 'config'}${fileExtension}`);
@@ -185,7 +184,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	set<Key extends keyof T>(key: Key, value?: T[Key]): void;
 	set(key: string, value: unknown): void;
 	set(object: Partial<T>): void;
-	set<Key extends keyof T>(key: Partial<T> | Key | string, value?: T[Key] | unknown): void {
+	set<Key extends keyof T>(key: Partial<T> | Key | string, value?: T[Key]): void {
 		if (typeof key !== 'string' && typeof key !== 'object') {
 			throw new TypeError(`Expected \`key\` to be of type \`string\` or \`object\`, got ${typeof key}`);
 		}
@@ -200,7 +199,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 		const {store} = this;
 
-		const set = (key: string, value?: T[Key] | T | unknown): void => {
+		const set = (key: string, value?: T[Key] | T): void => {
 			checkValueType(key, value);
 			if (this.#options.accessPropertiesByDotNotation) {
 				setProperty(store, key, value);
@@ -229,7 +228,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	*/
 	append<Key extends keyof T>(key: Key, newItem?: Array<T[Key]>): void;
 	append(key: string, newItem: unknown): void;
-	append<Key extends keyof T>(key: Partial<T> | Key | string, newItem?: Array<T[Key]> | unknown): void {
+	append<Key extends keyof T>(key: Partial<T> | Key | string, newItem?: Array<T[Key]>): void {
 		if (typeof key !== 'string' && typeof key !== 'object') {
 			throw new TypeError(`Expected \`key\` to be of type \`string\` or \`object\`, got ${typeof key}`);
 		}
@@ -413,7 +412,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		this._validate(value);
 		this._write(value);
 
-		this.events.emit('change');
+		this.events.dispatchEvent(new Event('change'));
 	}
 
 	* [Symbol.iterator](): IterableIterator<[keyof T, T[keyof T]]> {
@@ -487,8 +486,11 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			callback.call(this, newValue, oldValue);
 		};
 
-		this.events.on('change', onChange);
-		return () => this.events.removeListener('change', onChange);
+		this.events.addEventListener('change', onChange);
+
+		return () => {
+			this.events.removeEventListener('change', onChange);
+		};
 	}
 
 	private readonly _deserialize: Deserialize<T> = value => JSON.parse(value);
@@ -503,7 +505,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		return value;
 	};
 
-	private _validate(data: T | unknown): void {
+	private _validate(data: T): void {
 		if (!this.#validator) {
 			return;
 		}
@@ -591,12 +593,12 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			fs.watch(this.path, {persistent: false}, debounceFn(() => {
 			// On Linux and Windows, writing to the config file emits a `rename` event, so we skip checking the event type.
 				this.#cache = this._read();
-				this.events.emit('change');
+				this.events.dispatchEvent(new Event('change'));
 			}, {wait: 100}));
 		} else {
 			fs.watchFile(this.path, {persistent: false}, debounceFn(() => {
 				this.#cache = this._read();
-				this.events.emit('change');
+				this.events.dispatchEvent(new Event('change'));
 			}, {wait: 5000}));
 		}
 	}
