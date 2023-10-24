@@ -1,4 +1,3 @@
-import {type Buffer} from 'node:buffer';
 import {type EventEmitter} from 'node:events';
 import {type JSONSchema as TypedJSONSchema} from 'json-schema-typed';
 // eslint-disable unicorn/import-index
@@ -124,8 +123,8 @@ export type Options<T extends Record<string, any>> = {
 	cwd?: string;
 
 	encryption?: {
-		encrypt: (data: string) => Buffer
-		decrypt: (data: Buffer) => string
+		encrypt: (data: string) => Uint8Array;
+		decrypt: (data: Uint8Array) => string;
 	};
 
 	/**

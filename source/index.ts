@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-redundant-type-constituents */
 import process from 'node:process';
-import {Buffer} from 'node:buffer';
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert';
@@ -13,6 +12,10 @@ import ajvFormatsModule from 'ajv-formats';
 import debounceFn from 'debounce-fn';
 import semver from 'semver';
 import {type JSONSchema} from 'json-schema-typed';
+import {
+	stringToUint8Array,
+	uint8ArrayToString,
+} from 'uint8array-extras';
 import {
 	type Deserialize,
 	type Migrations,
@@ -440,17 +443,17 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 	}
 
-	private _encryptData(data: string): Buffer {
+	private _encryptData(data: string): Uint8Array {
 		if (!this.#options.encryption) {
-			return Buffer.from(data);
+			return stringToUint8Array(data);
 		}
 
-		return this.#options.encryption.encrypt(data)
+		return this.#options.encryption.encrypt(data);
 	}
 
-	private _decryptData(data: Buffer): string {
+	private _decryptData(data: Uint8Array): string {
 		if (!this.#options.encryption) {
-			return data.toString();
+			return uint8ArrayToString(data);
 		}
 
 		return this.#options.encryption.decrypt(data);
@@ -550,10 +553,10 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 		this._ensureDirectory();
 
-		let data: string | Buffer = this._serialize(this.#cache);
+		let data: string | Uint8Array = this._serialize(this.#cache);
 
 		if (this.#options.encryption) {
-			data = this._encryptData(data)
+			data = this._encryptData(data);
 		}
 
 		// Temporary workaround for Conf being packaged in a Ubuntu Snap app.
