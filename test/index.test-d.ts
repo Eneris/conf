@@ -1,5 +1,4 @@
 /* eslint-disable no-new, @typescript-eslint/naming-convention */
-import {Buffer} from 'node:buffer';
 import {expectType, expectAssignable, expectError} from 'tsd';
 import Conf from '../source/index.js';
 
@@ -23,10 +22,6 @@ new Conf<UnicornFoo>({
 new Conf<UnicornFoo>({configName: ''});
 new Conf<UnicornFoo>({projectName: 'foo'});
 new Conf<UnicornFoo>({cwd: ''});
-new Conf<UnicornFoo>({encryptionKey: ''});
-new Conf<UnicornFoo>({encryptionKey: Buffer.from('')});
-new Conf<UnicornFoo>({encryptionKey: new Uint8Array([1])});
-new Conf<UnicornFoo>({encryptionKey: new DataView(new ArrayBuffer(2))});
 new Conf<UnicornFoo>({fileExtension: '.foo'});
 new Conf<UnicornFoo>({configFileMode: 0o600});
 new Conf<UnicornFoo>({clearInvalidConfig: false});

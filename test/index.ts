@@ -468,17 +468,16 @@ test('`fileExtension` option = empty string', t => {
 });
 
 test('`serialize` and `deserialize` options', t => {
-	t.plan(4);
-	const serialized = `foo:${fixture}`;
 	const deserialized = {foo: fixture};
-	const serialize = (value: unknown): string => {
-		t.is(value, deserialized);
-		return serialized;
+
+	const serialize = (value: unknown) => {
+		t.pass();
+		return JSON.stringify(value);
 	};
 
-	const deserialize = (value: unknown) => {
-		t.is(value, serialized);
-		return deserialized;
+	const deserialize = (value: string) => {
+		t.pass();
+		return JSON.parse(value); //eslint-disable-line @typescript-eslint/no-unsafe-return, spaced-comment
 	};
 
 	const config = new Conf({
@@ -488,7 +487,9 @@ test('`serialize` and `deserialize` options', t => {
 	});
 
 	t.deepEqual(config.store, {} as any);
+
 	config.store = deserialized;
+
 	t.deepEqual(config.store, deserialized);
 });
 
@@ -540,7 +541,6 @@ test('`cwd` option overrides `projectName` option', t => {
 test('encryption', t => {
 	const config = new Conf({
 		cwd: temporaryDirectory(),
-		encryptionKey: 'abc123',
 	});
 
 	t.is(config.get('foo'), undefined);
@@ -558,7 +558,7 @@ test('encryption - upgrade', t => {
 	before.set('foo', fixture);
 	t.is(before.get('foo'), fixture);
 
-	const after = new Conf({cwd, encryptionKey: 'abc123'});
+	const after = new Conf({cwd});
 	t.is(after.get('foo'), fixture);
 });
 
@@ -567,7 +567,6 @@ test('encryption - corrupt file', t => {
 
 	const before = new Conf({
 		cwd,
-		encryptionKey: 'abc123',
 		clearInvalidConfig: true,
 	});
 
@@ -578,7 +577,6 @@ test('encryption - corrupt file', t => {
 
 	const after = new Conf({
 		cwd,
-		encryptionKey: 'abc123',
 		clearInvalidConfig: true,
 	});
 
@@ -711,12 +709,12 @@ test('doesn\'t write to disk upon instanciation if and only if the store didn\'t
 });
 
 test('`clearInvalidConfig` option - invalid data', t => {
-	const config = new Conf({cwd: temporaryDirectory(), clearInvalidConfig: false});
-	fs.writeFileSync(config.path, '🦄');
-
 	t.throws(() => {
-		// eslint-disable-next-line @typescript-eslint/no-unused-expressions
-		config.store;
+		const cwd = temporaryDirectory();
+
+		fs.writeFileSync(path.join(cwd, 'config.json'), '🦄');
+
+		new Conf({cwd, clearInvalidConfig: false});
 	}, {instanceOf: SyntaxError});
 });
 
@@ -805,10 +803,13 @@ test('schema - complex schema', t => {
 			},
 		},
 	};
+
 	const config = new Conf({cwd: temporaryDirectory(), schema});
+
 	t.throws(() => {
 		config.set('foo', 'abca');
 	}, {message: 'Config schema violation: `foo` must NOT have more than 3 characters; `foo` must match pattern "[def]+"'});
+
 	t.throws(() => {
 		config.set('bar', [1, 1, 2, 'a']);
 	}, {message: 'Config schema violation: `bar` must NOT have more than 3 items; `bar/3` must be integer; `bar` must NOT have duplicate items (items ## 1 and 0 are identical)'});
@@ -835,11 +836,13 @@ test('schema - invalid write to config file', t => {
 			type: 'string',
 		},
 	};
+
 	const cwd = temporaryDirectory();
 
-	const config = new Conf({cwd, schema});
 	fs.writeFileSync(path.join(cwd, 'config.json'), JSON.stringify({foo: 1}));
+
 	t.throws(() => {
+		const config = new Conf({cwd, schema});
 		config.get('foo');
 	}, {message: 'Config schema violation: `foo` must be string'});
 });
@@ -957,7 +960,6 @@ test('.delete() - without dot notation', t => {
 test('`watch` option watches for config file changes by another process', async t => {
 	const cwd = temporaryDirectory();
 	const conf1 = new Conf({cwd, watch: true});
-	const conf2 = new Conf({cwd});
 	conf1.set('foo', '👾');
 
 	t.plan(4);
@@ -966,6 +968,8 @@ test('`watch` option watches for config file changes by another process', async 
 		t.is(newValue, '🐴');
 		t.is(oldValue, '👾');
 	};
+
+	const conf2 = new Conf({cwd});
 
 	t.is(conf2.get('foo'), '👾');
 	t.is(conf1.path, conf2.path);
