@@ -60,6 +60,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	#writeTimer?: NodeJS.Timeout;
 	#cache: T = null as unknown as T;
 	#firstWrite = true;
+	#changed = false;
 
 	constructor(partialOptions: Readonly<Partial<Options<T>>> = {}) {
 		const options: Partial<Options<T>> = {
@@ -199,6 +200,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 		const set = (key: string, value?: T[Key] | T | unknown): void => {
 			checkValueType(key, value);
+			this.#changed = true;
 			if (this.#options.accessPropertiesByDotNotation) {
 				setProperty(store, key, value);
 			} else {
@@ -322,6 +324,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 				this.set(key, this.#defaultValues[key]);
 			}
 		}
+		this.#changed = true;		
 	}
 
 	/**
@@ -340,6 +343,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			delete store[key];
 		}
 
+		this.#changed = true;
 		this.store = store;
 	}
 
@@ -546,6 +550,10 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	private _forceWrite(): void {
+		if (!this.#changed) {
+			return;
+		}
+
 		this._cancelWrite();
 
 		this._ensureDirectory();
@@ -560,15 +568,18 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		// See https://github.com/sindresorhus/conf/pull/82
 		if (process.env.SNAP) {
 			fs.writeFileSync(this.path, data, {mode: this.#options.configFileMode});
+			this.#changed = false;
 		} else {
 			try {
 				atomicWriteFileSync(this.path, data, {mode: this.#options.configFileMode});
+				this.#changed = false;
 			} catch (error: unknown) {
 				// Fix for https://github.com/sindresorhus/electron-store/issues/106
 				// Sometimes on Windows, we will get an EXDEV error when atomic writing
 				// (even though to the same directory), so we fall back to non atomic write
 				if ((error as any)?.code === 'EXDEV') {
 					fs.writeFileSync(this.path, data, {mode: this.#options.configFileMode});
+					this.#changed = false;
 					return;
 				}
 
