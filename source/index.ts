@@ -667,6 +667,10 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	private _shouldPerformMigration(candidateVersion: string, previousMigratedVersion: string, versionToMigrate: string): boolean {
+		if (!previousMigratedVersion) {
+			return false;
+		}
+
 		if (this._isVersionInRangeFormat(candidateVersion)) {
 			if (previousMigratedVersion !== '0.0.0' && semver.satisfies(previousMigratedVersion, candidateVersion)) {
 				return false;
