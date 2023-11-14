@@ -21,9 +21,9 @@
 	},
 	"sideEffects": false,
 	"scripts": {
-		"test": "xo && npm run build && ava",
+		"test": "xo && yarn build && ava",
 		"build": "del-cli dist && tsc",
-		"prepack": "npm run build"
+		"prepack": "yarn build"
 	},
 	"files": [
 		"dist/source"
@@ -51,12 +51,12 @@
 		"ajv": "^8.12.0",
 		"ajv-formats": "^2.1.1",
 		"atomically": "^2.0.2",
-		"debounce-fn": "^5.1.2",
+		"debounce-fn": "^6.0.0",
 		"dot-prop": "^8.0.2",
 		"env-paths": "^3.0.0",
 		"json-schema-typed": "^8.0.1",
 		"semver": "^7.5.4",
-		"uint8array-extras": "^0.3.0"
+		"uint8array-extras": "^0.5.1"
 	},
 	"devDependencies": {
 		"@sindresorhus/tsconfig": "^5.0.0",
