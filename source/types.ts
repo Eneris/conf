@@ -1,5 +1,4 @@
 import {type Buffer} from 'node:buffer';
-import {type EventEmitter} from 'node:events';
 import {type JSONSchema as TypedJSONSchema} from 'json-schema-typed';
 // eslint-disable unicorn/import-index
 import type Conf from './index.js';
@@ -124,8 +123,8 @@ export type Options<T extends Record<string, any>> = {
 	cwd?: string;
 
 	encryption?: {
-		encrypt: (data: string) => Buffer
-		decrypt: (data: Buffer) => string
+		encrypt: (data: string) => Buffer;
+		decrypt: (data: Buffer) => string;
 	};
 
 	/**
@@ -257,4 +256,4 @@ export type Clone<T> = (value: T) => T;
 export type OnDidChangeCallback<T> = (newValue?: T, oldValue?: T) => void;
 export type OnDidAnyChangeCallback<T> = (newValue?: Readonly<T>, oldValue?: Readonly<T>) => void;
 
-export type Unsubscribe = () => EventEmitter;
+export type Unsubscribe = () => void;

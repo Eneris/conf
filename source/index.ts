@@ -1,10 +1,9 @@
-/* eslint-disable @typescript-eslint/naming-convention, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-redundant-type-constituents */
+/* eslint-disable @typescript-eslint/naming-convention, @typescript-eslint/no-unsafe-return */
 import process from 'node:process';
 import {Buffer} from 'node:buffer';
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert';
-import {EventEmitter} from 'node:events';
 import {getProperty, hasProperty, setProperty, deleteProperty} from 'dot-prop';
 import envPaths from 'env-paths';
 import {writeFileSync as atomicWriteFileSync} from 'atomically';
@@ -52,7 +51,7 @@ const MIGRATION_KEY = `${INTERNAL_KEY}.migrations.version`;
 
 export default class Conf<T extends Record<string, any> = Record<string, unknown>> implements Iterable<[keyof T, T[keyof T]]> {
 	readonly path: string;
-	readonly events: EventEmitter;
+	readonly events: EventTarget;
 	readonly #validator?: AjvValidateFunction;
 	readonly #options: Readonly<Partial<Options<T>>>;
 	readonly #defaultValues: Partial<T> = {};
@@ -124,7 +123,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			this._deserialize = options.deserialize;
 		}
 
-		this.events = new EventEmitter();
+		this.events = new EventTarget();
 
 		const fileExtension = options.fileExtension ? `.${options.fileExtension}` : '';
 		this.path = path.resolve(options.cwd, `${options.configName ?? 'config'}${fileExtension}`);
@@ -410,7 +409,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		this._validate(value);
 		this._write(value);
 
-		this.events.emit('change');
+		this.events.dispatchEvent(new Event('change'));
 	}
 
 	* [Symbol.iterator](): IterableIterator<[keyof T, T[keyof T]]> {
@@ -445,7 +444,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			return Buffer.from(data);
 		}
 
-		return this.#options.encryption.encrypt(data)
+		return this.#options.encryption.encrypt(data);
 	}
 
 	private _decryptData(data: Buffer): string {
@@ -484,8 +483,11 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			callback.call(this, newValue, oldValue);
 		};
 
-		this.events.on('change', onChange);
-		return () => this.events.removeListener('change', onChange);
+		this.events.addEventListener('change', onChange);
+
+		return () => {
+			this.events.removeEventListener('change', onChange);
+		};
 	}
 
 	private readonly _deserialize: Deserialize<T> = value => JSON.parse(value);
@@ -553,7 +555,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		let data: string | Buffer = this._serialize(this.#cache);
 
 		if (this.#options.encryption) {
-			data = this._encryptData(data)
+			data = this._encryptData(data);
 		}
 
 		// Temporary workaround for Conf being packaged in a Ubuntu Snap app.
@@ -588,12 +590,12 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			fs.watch(this.path, {persistent: false}, debounceFn(() => {
 			// On Linux and Windows, writing to the config file emits a `rename` event, so we skip checking the event type.
 				this.#cache = this._read();
-				this.events.emit('change');
+				this.events.dispatchEvent(new Event('change'));
 			}, {wait: 100}));
 		} else {
 			fs.watchFile(this.path, {persistent: false}, debounceFn(() => {
 				this.#cache = this._read();
-				this.events.emit('change');
+				this.events.dispatchEvent(new Event('change'));
 			}, {wait: 5000}));
 		}
 	}
