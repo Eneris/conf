@@ -61,7 +61,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 	#writeTimer?: NodeJS.Timeout;
 	#cache: T = null as unknown as T;
-	#firstWrite = true;
+	#writePending = false;
 
 	constructor(partialOptions: Readonly<Partial<Options<T>>> = {}) {
 		const options: Partial<Options<T>> = {
@@ -211,7 +211,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		if (typeof key === 'object') {
 			const object = key;
 			for (const [key, value] of Object.entries(object)) {
-				set(key, value);
+				set(key, value as T[Key]);
 			}
 		} else {
 			set(key, value);
@@ -527,31 +527,42 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	private _write(value: T): void {
-		this._cancelWrite();
-
-		// Pass thru JSON to ensure deep clone
+		// Write change to memory right away
 		this.#cache = value;
 
-		if (this.#firstWrite || !this.#options.writeTimeout) {
-			this._forceWrite();
-			this.#firstWrite = false;
+		if (this.#writeTimer) {
+			this.#writePending = true;
 		} else {
-			this.#writeTimer = setTimeout(() => {
-				this._forceWrite();
-				// This.#writeTimer = null;
-			}, this.#options?.writeTimeout);
+			this._forceWrite();
+			this._startWriteTimeout();
 		}
 	}
 
-	private _cancelWrite() {
+	private _startWriteTimeout() {
+		this._cancelWriteTimeout();
+
+		if (this.#options?.writeTimeout) {
+			this.#writeTimer = setTimeout(() => {
+				this.#writeTimer = undefined;
+
+				if (this.#writePending) {
+					this.#writePending = false;
+					this._forceWrite();
+				}
+			}, this.#options.writeTimeout);
+		}
+	}
+
+	private _cancelWriteTimeout() {
 		if (this.#writeTimer) {
 			clearTimeout(this.#writeTimer);
-			// This.#writeTimer = null;
+			this.#writeTimer = undefined;
+			this.#writePending = false;
 		}
 	}
 
 	private _forceWrite(): void {
-		this._cancelWrite();
+		this._cancelWriteTimeout();
 
 		this._ensureDirectory();
 
