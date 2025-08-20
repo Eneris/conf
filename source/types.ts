@@ -328,6 +328,4 @@ export type DotNotationValueOf<T extends Record<string, any>, K extends DotNotat
 			? T[K]
 			: never;
 
-export type PartialObjectDeep<T> = {[K in keyof T]?: PartialObjectDeep<T[K]>};
-
 export type {CurrentOptions as AjvOptions} from 'ajv/dist/core.js';
