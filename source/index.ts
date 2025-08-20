@@ -32,7 +32,6 @@ import {
 	type BeforeEachMigrationCallback,
 	type DotNotationKeyOf,
 	type DotNotationValueOf,
-	type PartialObjectDeep,
 } from './types.js';
 
 const createPlainObject = <T = Record<string, unknown>>(): T => Object.create(null);
@@ -208,8 +207,8 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	set<Key extends DotNotationKeyOf<T>>(key: Key, Value?: DotNotationValueOf<T, Key>): void;
 	// Fallback for dynamic dot-notation paths that can't be statically typed
 	set(key: string, value: unknown): void;
-	set(object: PartialObjectDeep<T>): void;
-	set<Key extends keyof T>(key: PartialObjectDeep<T> | string, value?: unknown): void {
+	set(object: Partial<T>): void;
+	set<Key extends keyof T>(key: Partial<T> | string, value?: unknown): void {
 		if (typeof key !== 'string' && typeof key !== 'object') {
 			throw new TypeError(`Expected \`key\` to be of type \`string\` or \`object\`, got ${typeof key}`);
 		}
@@ -747,7 +746,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 	}
 
-	private _containsReservedKey(key: string | PartialObjectDeep<T>): boolean {
+	private _containsReservedKey(key: string | Partial<T>): boolean {
 		if (typeof key === 'object') {
 			const firstKey = Object.keys(key)[0];
 
