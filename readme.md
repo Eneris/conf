@@ -185,7 +185,7 @@ const store = new Conf({
 
 #### beforeEachMigration
 
-Type: `Function`\
+Type: `Function`
 Default: `undefined`
 
 The given callback function will be called before each migration step.
@@ -233,7 +233,7 @@ const secondConfig = new Conf({
 
 #### configName
 
-Type: `string`\
+Type: `string`
 Default: `'config'`
 
 Name of the config file (without extension).
@@ -258,7 +258,7 @@ You can fetch the `version` field from package.json.
 
 #### cwd
 
-Type: `string`\
+Type: `string`
 Default: System default [user config directory](https://github.com/sindresorhus/env-paths#pathsconfig)
 
 **You most likely don't need this. Please don't use it unless you really have to. By default, it will pick the optimal location by adhering to system conventions. You are very likely to get this wrong and annoy users.**
@@ -267,20 +267,16 @@ Overrides `projectName`.
 
 The only use-case I can think of is having the config located in the app directory or on some external storage.
 
-#### encryptionKey
+#### encryption
 
-Type: `string | Uint8Array | TypedArray | DataView`\
+Type: `object`
 Default: `undefined`
 
-Note that this is **not intended for security purposes**, since the encryption key would be easily found inside a plain-text Node.js app.
-
-Its main use is for obscurity. If a user looks through the config directory and finds the config file, since it's just a JSON file, they may be tempted to modify it. By providing an encryption key, the file will be obfuscated, which should hopefully deter any users from doing so.
-
-When specified, the store will be encrypted using the [`aes-256-cbc`](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation) encryption algorithm.
+Object containing methods to encrypt and decrypt data
 
 #### fileExtension
 
-Type: `string`\
+Type: `string`
 Default: `'json'`
 
 Extension of the config file.
@@ -289,14 +285,14 @@ You would usually not need this, but could be useful if you want to interact wit
 
 #### clearInvalidConfig
 
-Type: `boolean`\
+Type: `boolean`
 Default: `false`
 
 The config is cleared if reading the config file causes a `SyntaxError`. This is a good behavior for unimportant data, as the config file is not intended to be hand-edited, so it usually means the config is corrupt and there's nothing the user can do about it anyway. However, if you let the user edit the config file directly, mistakes might happen and it could be more useful to throw an error when the config is invalid instead of clearing.
 
 #### serialize
 
-Type: `Function`\
+Type: `Function`
 Default: `value => JSON.stringify(value, null, '\t')`
 
 Function to serialize the config object to a UTF-8 string when writing the config file.
@@ -305,7 +301,7 @@ You would usually not need this, but it could be useful if you want to use a for
 
 #### deserialize
 
-Type: `Function`\
+Type: `Function`
 Default: `JSON.parse`
 
 Function to deserialize the config object from a UTF-8 string when reading the config file.
@@ -314,7 +310,7 @@ You would usually not need this, but it could be useful if you want to use a for
 
 #### projectSuffix
 
-Type: `string`\
+Type: `string`
 Default: `'nodejs'`
 
 **You most likely don't need this. Please don't use it unless you really have to.**
@@ -327,7 +323,7 @@ For example, on macOS, the config file will be stored in the `~/Library/Preferen
 
 #### accessPropertiesByDotNotation
 
-Type: `boolean`\
+Type: `boolean`
 Default: `true`
 
 Accessing nested properties by dot notation. For example:
@@ -369,14 +365,14 @@ console.log(config.get('foo.bar.foobar'));
 
 #### watch
 
-type: `boolean`\
+type: `boolean`
 Default: `false`
 
 Watch for any changes in the config file and call the callback for `onDidChange` or `onDidAnyChange` if set. This is useful if there are multiple processes changing the same config file.
 
 #### configFileMode
 
-Type: `number`\
+Type: `number`
 Default: `0o666`
 
 The [mode](https://en.wikipedia.org/wiki/File-system_permissions#Numeric_notation) that will be used for the config file.
@@ -400,6 +396,24 @@ The `value` must be JSON serializable. Trying to set the type `undefined`, `func
 #### .set(object)
 
 Set multiple items at once.
+
+#### .toggle(key)
+
+Toggle boolean item
+
+Type of the item must be `boolean` or be empty. Trying to toggle different type will result in TypeError.
+
+Returns the new value after successful toggle.
+
+#### .append(key, value)
+
+Append the given value to the array.
+
+Type of the item must be `array`. Trying to append into different type will result in TypeError.
+
+#### .mutate(key, mutation)
+
+Calls supplied mutation on the item and replaces it with its result.
 
 #### .get(key, defaultValue?)
 
@@ -466,11 +480,6 @@ Get the item count.
 #### .store
 
 Get all the config as an object or replace the current config with an object:
-
-```js
-console.log(config.store);
-//=> {name: 'John', age: 30}
-```
 
 ```js
 config.store = {

@@ -163,16 +163,10 @@ export type Options<T extends Record<string, any>> = {
 	*/
 	cwd?: string;
 
-	/**
-	Note that this is __not intended for security purposes__, since the encryption key would be easily found inside a plain-text Node.js app.
-
-	Its main use is for obscurity. If a user looks through the config directory and finds the config file, since it's just a JSON file, they may be tempted to modify it. By providing an encryption key, the file will be obfuscated, which should hopefully deter any users from doing so.
-
-	It also has the added bonus of ensuring the config file's integrity. If the file is changed in any way, the decryption will not work, in which case the store will just reset back to its default state.
-
-	When specified, the store will be encrypted using the [`aes-256-cbc`](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation) encryption algorithm.
-	*/
-	encryptionKey?: string | Uint8Array | NodeJS.TypedArray | DataView;
+	encryption?: {
+		encrypt: (data: string) => Uint8Array;
+		decrypt: (data: Uint8Array) => string;
+	};
 
 	/**
 	Extension of the config file.
@@ -279,6 +273,8 @@ export type Options<T extends Record<string, any>> = {
 	@default 0o666
 	*/
 	readonly configFileMode?: number;
+
+	readonly writeTimeout?: number;
 };
 
 export type Migrations<T extends Record<string, any>> = Record<string, (store: Conf<T>) => void>;
@@ -296,6 +292,7 @@ export type ValueSchema = TypedJSONSchema;
 
 export type Serialize<T> = (value: T) => string;
 export type Deserialize<T> = (text: string) => T;
+export type Clone<T> = (value: T) => T;
 
 export type OnDidChangeCallback<T> = (newValue?: T, oldValue?: T) => void;
 export type OnDidAnyChangeCallback<T> = (newValue?: Readonly<T>, oldValue?: Readonly<T>) => void;

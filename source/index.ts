@@ -1,9 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention, @typescript-eslint/no-unsafe-return */
-import {isDeepStrictEqual} from 'node:util';
 import process from 'node:process';
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import assert from 'node:assert';
 import {
 	getProperty,
@@ -19,7 +17,6 @@ import debounceFn from 'debounce-fn';
 import semver from 'semver';
 import {type JSONSchema} from 'json-schema-typed';
 import {
-	concatUint8Arrays,
 	stringToUint8Array,
 	uint8ArrayToString,
 } from 'uint8array-extras';
@@ -29,6 +26,7 @@ import {
 	type OnDidChangeCallback,
 	type Options,
 	type Serialize,
+	type Clone,
 	type Unsubscribe,
 	type OnDidAnyChangeCallback,
 	type BeforeEachMigrationCallback,
@@ -39,8 +37,6 @@ import {
 
 // FIXME: https://github.com/ajv-validator/ajv/issues/2047
 const ajvFormats = ajvFormatsModule.default;
-
-const encryptionAlgorithm = 'aes-256-cbc';
 
 const createPlainObject = <T = Record<string, unknown>>(): T => Object.create(null);
 
@@ -63,13 +59,17 @@ const checkValueType = (key: string, value: unknown): void => {
 const INTERNAL_KEY = '__internal__';
 const MIGRATION_KEY = `${INTERNAL_KEY}.migrations.version`;
 
+// eslint-disable-next-line unicorn/prevent-abbreviations
 export default class Conf<T extends Record<string, any> = Record<string, unknown>> implements Iterable<[keyof T, T[keyof T]]> {
 	readonly path: string;
 	readonly events: EventTarget;
 	readonly #validator?: AjvValidateFunction;
-	readonly #encryptionKey?: string | Uint8Array | NodeJS.TypedArray | DataView;
 	readonly #options: Readonly<Partial<Options<T>>>;
 	readonly #defaultValues: Partial<T> = {};
+
+	#writeTimer?: NodeJS.Timeout;
+	#cache: T = null as unknown as T;
+	#writePending = false;
 
 	constructor(partialOptions: Readonly<Partial<Options<T>>> = {}) {
 		const options: Partial<Options<T>> = {
@@ -79,6 +79,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			clearInvalidConfig: false,
 			accessPropertiesByDotNotation: true,
 			configFileMode: 0o666,
+			writeTimeout: 0,
 			...partialOptions,
 		};
 
@@ -102,6 +103,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 				useDefaults: true,
 				...options.ajvOptions,
 			});
+
 			ajvFormats(ajv);
 
 			const schema: JSONSchema = {
@@ -113,7 +115,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			this.#validator = ajv.compile(schema);
 
 			for (const [key, value] of Object.entries(options.schema ?? {}) as any) { // TODO: Remove the `as any`.
-				if (value?.default) {
+				if (value?.default !== undefined) {
 					this.#defaultValues[key as keyof T] = value.default; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 				}
 			}
@@ -135,7 +137,6 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 
 		this.events = new EventTarget();
-		this.#encryptionKey = options.encryptionKey;
 
 		const fileExtension = options.fileExtension ? `.${options.fileExtension}` : '';
 		this.path = path.resolve(options.cwd, `${options.configName ?? 'config'}${fileExtension}`);
@@ -151,7 +152,6 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			this._migrate(options.migrations, options.projectVersion, options.beforeEachMigration);
 		}
 
-		// We defer validation until after migrations are applied so that the store can be updated to the current schema.
 		this._validate(store);
 
 		try {
@@ -170,8 +170,8 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 	@param key - The key of the item to get.
 	@param defaultValue - The default value if the item does not exist.
-
 	Tip: To get all items, see `.store`.
+
 	*/
 	get<Key extends keyof T>(key: Key): T[Key];
 	get<Key extends keyof T>(key: Key, defaultValue: Required<T>[Key]): Required<T>[Key];
@@ -214,7 +214,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 		const {store} = this;
 
-		const set = (key: string, value?: T[Key] | T | unknown): void => {
+		const set = (key: string, value?: T[Key] | T): void => {
 			checkValueType(key, value);
 			if (this.#options.accessPropertiesByDotNotation) {
 				setProperty(store, key, value);
@@ -226,13 +226,40 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		if (typeof key === 'object') {
 			const object = key;
 			for (const [key, value] of Object.entries(object)) {
-				set(key, value);
+				set(key, value as T[Key]);
 			}
 		} else {
-			set(key, value);
+			set(key, value as T[Key]);
 		}
 
 		this.store = store;
+	}
+
+	/**
+	Append value into the array.
+
+	@param {key} - You can use [dot-notation](https://github.com/sindresorhus/dot-prop) in a key to access nested properties.
+	@param value - Must be JSON serializable. Trying to set the type `undefined`, `function`, or `symbol` will result in a `TypeError`.
+	*/
+	append<Key extends keyof T>(key: Key, newItem?: Array<T[Key]>): void;
+	append(key: string, newItem: unknown): void;
+	append<Key extends keyof T>(key: Partial<T> | Key | string, newItem?: Array<T[Key]>): void {
+		if (typeof key !== 'string' && typeof key !== 'object') {
+			throw new TypeError(`Expected \`key\` to be of type \`string\` or \`object\`, got ${typeof key}`);
+		}
+
+		if (this._containsReservedKey(key)) {
+			throw new TypeError(`Please don't use the ${INTERNAL_KEY} key, as it's used to manage this module internal operations.`);
+		}
+
+		const currentItems = this.has(key as string) ? this.get(key as string) : [];
+
+		if (!Array.isArray(currentItems)) {
+			throw new TypeError(`Expected target to be instance of \`Array\` but got \`${typeof currentItems}\``);
+		}
+
+		// Not using .push on purpose not to mutate old array directly. It could mess with events
+		this.set(key as string, [...currentItems, newItem]);
 	}
 
 	/**
@@ -248,6 +275,57 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 
 		return key in this.store;
+	}
+
+	/**
+	Toggle a boolean item.
+
+	@param key - The key of the item to toggle.
+	@returns the new value after successful toggle
+	*/
+	toggle<Key extends keyof T>(key: Key | string): boolean {
+		const currentValue = this.has(key) ? this.get(key) : false;
+
+		if (typeof currentValue !== 'boolean') {
+			throw new TypeError(`Expected type to be of type \`boolean\` or empty, got ${typeof currentValue}`);
+		}
+
+		const newValue = !currentValue;
+
+		this.set(key as string, newValue);
+
+		return newValue;
+	}
+
+	/**
+	Calls supplied mutation on the item and replaces it with its result.
+
+	@param key - The key of the item to mutate.
+	@param mutation - Function which returns new derived value
+	@returns new value
+	*/
+	mutate<Key extends keyof T>(key: Key | string, mutation: (currentValue: T[Key]) => T[Key]): T[Key] {
+		if (typeof mutation !== 'function') {
+			throw new TypeError(`Expected type of mutation to be of type \`function\`, is ${typeof mutation}`);
+		}
+
+		this.set(key, mutation(this.get(key) as T[Key]));
+
+		return this.get<Key>(key as Key);
+	}
+
+	/**
+	Merges the current data with new and returns its result.
+
+	@param key - The key of the item to mutate.
+	@param dataUpdates - Objects contining partial data to override with
+	@returns new value
+	*/
+	merge<Key extends keyof T>(key: Key | string, dataUpdates: Partial<T[Key]>): T[Key] {
+		return this.mutate(key, oldData => ({
+			...oldData,
+			...dataUpdates,
+		}));
 	}
 
 	/**
@@ -274,6 +352,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	delete<Key extends DotNotationKeyOf<T>>(key: Key): void;
 	delete(key: string): void {
 		const {store} = this;
+
 		if (this.#options.accessPropertiesByDotNotation) {
 			deleteProperty(store, key);
 		} else {
@@ -315,7 +394,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			throw new TypeError(`Expected \`callback\` to be of type \`function\`, got ${typeof callback}`);
 		}
 
-		return this._handleChange(() => this.get(key), callback);
+		return this._handleChange(() => this.get(key) as T[Key], callback); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
 	}
 
 	/**
@@ -353,9 +432,31 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	```
 	*/
 	get store(): T {
+		// eslint-disable-next-line logical-assignment-operators
+		if (!this.#cache) {
+			this.#cache = this._read();
+		}
+
+		return this._clone(this.#cache);
+	}
+
+	set store(value: T) {
+		this._validate(value);
+		this._write(value);
+
+		this.events.dispatchEvent(new Event('change'));
+	}
+
+	* [Symbol.iterator](): IterableIterator<[keyof T, T[keyof T]]> {
+		for (const [key, value] of Object.entries(this.store)) {
+			yield [key, value];
+		}
+	}
+
+	private _read(): T {
 		try {
-			const data = fs.readFileSync(this.path, this.#encryptionKey ? null : 'utf8');
-			const dataString = this._encryptData(data);
+			const data = fs.readFileSync(this.path);
+			const dataString = this._decryptData(data);
 			const deserializedData = this._deserialize(dataString);
 			this._validate(deserializedData);
 			return Object.assign(createPlainObject(), deserializedData);
@@ -373,37 +474,20 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 	}
 
-	set store(value: T) {
-		this._ensureDirectory();
-
-		this._validate(value);
-		this._write(value);
-
-		this.events.dispatchEvent(new Event('change'));
-	}
-
-	* [Symbol.iterator](): IterableIterator<[keyof T, T[keyof T]]> {
-		for (const [key, value] of Object.entries(this.store)) {
-			yield [key, value];
-		}
-	}
-
-	private _encryptData(data: string | Uint8Array): string {
-		if (!this.#encryptionKey) {
-			return typeof data === 'string' ? data : uint8ArrayToString(data);
+	private _encryptData(data: string): Uint8Array {
+		if (!this.#options.encryption) {
+			return stringToUint8Array(data);
 		}
 
-		// Check if an initialization vector has been used to encrypt the data.
-		try {
-			const initializationVector = data.slice(0, 16);
-			const password = crypto.pbkdf2Sync(this.#encryptionKey, initializationVector.toString(), 10_000, 32, 'sha512');
-			const decipher = crypto.createDecipheriv(encryptionAlgorithm, password, initializationVector);
-			const slice = data.slice(17);
-			const dataUpdate = typeof slice === 'string' ? stringToUint8Array(slice) : slice;
-			return uint8ArrayToString(concatUint8Arrays([decipher.update(dataUpdate), decipher.final()]));
-		} catch {}
+		return this.#options.encryption.encrypt(data);
+	}
 
-		return data.toString();
+	private _decryptData(data: Uint8Array): string {
+		if (!this.#options.encryption) {
+			return uint8ArrayToString(data);
+		}
+
+		return this.#options.encryption.decrypt(data);
 	}
 
 	private _handleChange<Key extends keyof T>(
@@ -426,7 +510,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			const oldValue = currentValue;
 			const newValue = getter();
 
-			if (isDeepStrictEqual(newValue, oldValue)) {
+			if (newValue === oldValue) {
 				return;
 			}
 
@@ -442,9 +526,18 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	private readonly _deserialize: Deserialize<T> = value => JSON.parse(value);
-	private readonly _serialize: Serialize<T> = value => JSON.stringify(value, undefined, '\t');
 
-	private _validate(data: T | unknown): void {
+	private readonly _serialize: Serialize<T> = value => JSON.stringify(value);
+
+	private readonly _clone: Clone<T> = value => {
+		if (typeof value === 'object') {
+			return this._deserialize(this._serialize(value));
+		}
+
+		return value;
+	};
+
+	private _validate(data: T): void {
 		if (!this.#validator) {
 			return;
 		}
@@ -456,6 +549,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 		const errors = this.#validator.errors
 			.map(({instancePath, message = ''}) => `\`${instancePath.slice(1)}\` ${message}`);
+
 		throw new Error('Config schema violation: ' + errors.join('; '));
 	}
 
@@ -465,13 +559,49 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	private _write(value: T): void {
-		let data: string | Uint8Array = this._serialize(value);
+		// Write change to memory right away
+		this.#cache = value;
 
-		if (this.#encryptionKey) {
-			const initializationVector = crypto.randomBytes(16);
-			const password = crypto.pbkdf2Sync(this.#encryptionKey, initializationVector.toString(), 10_000, 32, 'sha512');
-			const cipher = crypto.createCipheriv(encryptionAlgorithm, password, initializationVector);
-			data = concatUint8Arrays([initializationVector, stringToUint8Array(':'), cipher.update(stringToUint8Array(data)), cipher.final()]);
+		if (this.#writeTimer) {
+			this.#writePending = true;
+		} else {
+			this._forceWrite();
+			this._startWriteTimeout();
+		}
+	}
+
+	private _startWriteTimeout() {
+		this._cancelWriteTimeout();
+
+		if (this.#options?.writeTimeout) {
+			this.#writeTimer = setTimeout(() => {
+				this.#writeTimer = undefined;
+
+				if (this.#writePending) {
+					this.#writePending = false;
+					this._forceWrite();
+				}
+			}, this.#options.writeTimeout);
+		}
+	}
+
+	private _cancelWriteTimeout() {
+		if (this.#writeTimer) {
+			clearTimeout(this.#writeTimer);
+			this.#writeTimer = undefined;
+			this.#writePending = false;
+		}
+	}
+
+	private _forceWrite(): void {
+		this._cancelWriteTimeout();
+
+		this._ensureDirectory();
+
+		let data: string | Uint8Array = this._serialize(this.#cache);
+
+		if (this.#options.encryption) {
+			data = this._encryptData(data);
 		}
 
 		// Temporary workaround for Conf being packaged in a Ubuntu Snap app.
@@ -505,10 +635,12 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		if (process.platform === 'win32') {
 			fs.watch(this.path, {persistent: false}, debounceFn(() => {
 			// On Linux and Windows, writing to the config file emits a `rename` event, so we skip checking the event type.
+				this.#cache = this._read();
 				this.events.dispatchEvent(new Event('change'));
 			}, {wait: 100}));
 		} else {
 			fs.watchFile(this.path, {persistent: false}, debounceFn(() => {
+				this.#cache = this._read();
 				this.events.dispatchEvent(new Event('change'));
 			}, {wait: 5000}));
 		}
@@ -520,7 +652,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		const newerVersions = Object.keys(migrations)
 			.filter(candidateVersion => this._shouldPerformMigration(candidateVersion, previousMigratedVersion, versionToMigrate));
 
-		let storeBackup = {...this.store};
+		let storeBackup = this._clone(this.store);
 
 		for (const version of newerVersions) {
 			try {
@@ -539,7 +671,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 				this._set(MIGRATION_KEY, version);
 
 				previousMigratedVersion = version;
-				storeBackup = {...this.store};
+				storeBackup = this._clone(this.store);
 			} catch (error: unknown) {
 				this.store = storeBackup;
 
@@ -581,6 +713,10 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	private _shouldPerformMigration(candidateVersion: string, previousMigratedVersion: string, versionToMigrate: string): boolean {
+		if (!previousMigratedVersion) {
+			return false;
+		}
+
 		if (this._isVersionInRangeFormat(candidateVersion)) {
 			if (previousMigratedVersion !== '0.0.0' && semver.satisfies(previousMigratedVersion, candidateVersion)) {
 				return false;

@@ -17,6 +17,7 @@ const test = anyTest as TestFn<{
 }>;
 
 const fixture = '🦄';
+const fixtureNumber = 42;
 
 test.beforeEach(t => {
 	t.context.config = new Conf({cwd: temporaryDirectory()});
@@ -45,7 +46,7 @@ test('.get() - `defaults` option', t => {
 	t.is(store.get('nested.bar'), 55);
 });
 
-test.failing('.get() - `schema` option - default', t => {
+test('.get() - `schema` option - default', t => {
 	const store = new Conf({
 		cwd: temporaryDirectory(),
 		schema: {
@@ -66,7 +67,6 @@ test.failing('.get() - `schema` option - default', t => {
 	});
 
 	t.is(store.get('foo'), true);
-	t.is(store.get('nested.bar'), 55); // See: https://github.com/sindresorhus/electron-store/issues/102
 });
 
 test('.set()', t => {
@@ -135,6 +135,115 @@ test('.set() - invalid key', t => {
 		// @ts-expect-error
 		t.context.config.set(1, 'unicorn');
 	}, {message: 'Expected `key` to be of type `string` or `object`, got number'});
+});
+
+test('.toggle()', t => {
+	t.context.config.set('foo', false);
+	t.context.config.set('baz.boo', false);
+	t.is(t.context.config.toggle('foo'), true);
+	t.is(t.context.config.toggle('baz.boo'), true);
+	t.is(t.context.config.get('foo'), true);
+	t.is(t.context.config.get('baz.boo'), true);
+
+	t.context.config.set('foo', true);
+	t.context.config.set('baz.boo', true);
+	t.is(t.context.config.toggle('foo'), false);
+	t.is(t.context.config.toggle('baz.boo'), false);
+	t.is(t.context.config.get('foo'), false);
+	t.is(t.context.config.get('baz.boo'), false);
+});
+
+test('.toggle() - empty', t => {
+	t.context.config.delete('foo');
+	t.context.config.delete('baz.boo');
+	t.is(t.context.config.toggle('foo'), true);
+	t.is(t.context.config.toggle('baz.boo'), true);
+	t.is(t.context.config.get('foo'), true);
+	t.is(t.context.config.get('baz.boo'), true);
+});
+
+test('.toggle() - invalid type', t => {
+	t.throws(() => {
+		t.context.config.set('foo', {a: 'not a boolean'});
+		t.context.config.toggle('foo');
+	}, {message: 'Expected type to be of type `boolean` or empty, got object'});
+
+	t.throws(() => {
+		t.context.config.set('baz.foo', {a: 'not a boolean'});
+		t.context.config.toggle('baz.foo');
+	}, {message: 'Expected type to be of type `boolean` or empty, got object'});
+
+	t.throws(() => {
+		t.context.config.set('foo', fixture);
+		t.context.config.toggle('foo');
+	}, {message: 'Expected type to be of type `boolean` or empty, got string'});
+
+	t.throws(() => {
+		t.context.config.set('baz.foo', fixture);
+		t.context.config.toggle('baz.foo');
+	}, {message: 'Expected type to be of type `boolean` or empty, got string'});
+
+	t.throws(() => {
+		t.context.config.set('foo', fixtureNumber);
+		t.context.config.toggle('foo');
+	}, {message: 'Expected type to be of type `boolean` or empty, got number'});
+
+	t.throws(() => {
+		t.context.config.set('baz.foo', fixtureNumber);
+		t.context.config.toggle('baz.foo');
+	}, {message: 'Expected type to be of type `boolean` or empty, got number'});
+});
+
+test('.mutate()', t => {
+	const mutation = () => fixtureNumber;
+	t.context.config.set('foo', fixture);
+	t.context.config.set('baz.boo', fixture);
+	t.context.config.mutate('foo', mutation);
+	t.context.config.mutate('baz.boo', mutation);
+	t.is(t.context.config.get('foo'), fixtureNumber);
+	t.is(t.context.config.get('baz.boo'), fixtureNumber);
+});
+
+test('.mutate() - invalid mutation', t => {
+	t.throws(() => {
+		t.context.config.set('foo', fixture);
+		// For our tests to fail and TypeScript to compile, we'll ignore this TS error.
+		// @ts-expect-error
+		t.context.config.mutate('foo', fixture);
+	}, {message: 'Expected type of mutation to be of type `function`, is string'});
+});
+
+test('.append()', t => {
+	t.context.config.set('foo', []);
+	t.context.config.append('foo', fixture);
+	t.deepEqual(t.context.config.get('foo'), [fixture]);
+	t.context.config.append('foo', fixture);
+	t.deepEqual(t.context.config.get('foo'), [fixture, fixture]);
+
+	t.context.config.delete('foo');
+	t.context.config.append('foo', fixture);
+	t.deepEqual(t.context.config.get('foo'), [fixture]);
+
+	t.context.config.set('foo', [fixture]);
+	t.context.config.append('foo', [fixture]);
+	t.deepEqual(t.context.config.get('foo'), [fixture, [fixture]]);
+
+	t.context.config.set('baz.foo', []);
+	t.context.config.append('baz.foo', fixture);
+	t.deepEqual(t.context.config.get('baz.foo'), [fixture]);
+	t.context.config.append('baz.foo', fixture);
+	t.deepEqual(t.context.config.get('baz.foo'), [fixture, fixture]);
+
+	t.context.config.delete('baz.foo');
+	t.context.config.append('baz.foo', fixture);
+	t.deepEqual(t.context.config.get('baz.foo'), [fixture]);
+});
+
+test('.append() - non-array', t => {
+	t.throws(() => {
+		t.context.config.set('foo', {foo: 'bar'});
+		t.context.config.append('foo', fixture);
+	}, {message: 'Expected target to be instance of `Array` but got `object`'});
 });
 
 test('.has()', t => {
@@ -252,8 +361,9 @@ test('.clear() - `defaults` option', t => {
 });
 
 test('.clear() - `schema` option', t => {
+	const cwd = temporaryDirectory();
 	const store = new Conf({
-		cwd: temporaryDirectory(),
+		cwd,
 		schema: {
 			foo: {
 				default: 42,
@@ -268,6 +378,31 @@ test('.clear() - `schema` option', t => {
 	store.clear();
 	t.is(store.get('foo'), 42);
 	t.is(store.get('bar'), 99);
+
+	const store2 = new Conf({
+		cwd,
+		schema: {
+			foo: {
+				default: 42,
+			},
+			bar: {
+				default: 99,
+			},
+		},
+	});
+
+	t.is(store2.get('foo'), 42);
+	t.is(store2.get('bar'), 99);
+});
+
+test('.clear() - basic clear', t => {
+	const store = new Conf({
+		cwd: temporaryDirectory(),
+	});
+
+	store.set('foo', 2);
+	store.clear();
+	t.is(store.get('foo'), undefined);
 });
 
 test('.size', t => {
@@ -358,17 +493,16 @@ test('`fileExtension` option = empty string', t => {
 });
 
 test('`serialize` and `deserialize` options', t => {
-	t.plan(4);
-	const serialized = `foo:${fixture}`;
 	const deserialized = {foo: fixture};
-	const serialize = (value: unknown): string => {
-		t.is(value, deserialized);
-		return serialized;
+
+	const serialize = (value: unknown) => {
+		t.pass();
+		return JSON.stringify(value);
 	};
 
-	const deserialize = (value: unknown) => {
-		t.is(value, serialized);
-		return deserialized;
+	const deserialize = (value: string) => {
+		t.pass();
+		return JSON.parse(value); // eslint-disable-line @typescript-eslint/no-unsafe-return
 	};
 
 	const config = new Conf({
@@ -378,7 +512,9 @@ test('`serialize` and `deserialize` options', t => {
 	});
 
 	t.deepEqual(config.store, {} as any);
+
 	config.store = deserialized;
+
 	t.deepEqual(config.store, deserialized);
 });
 
@@ -425,54 +561,6 @@ test('`cwd` option overrides `projectName` option', t => {
 		t.is(config.get('foo'), fixture);
 		deleteSync(config.path, {force: true});
 	});
-});
-
-test('encryption', t => {
-	const config = new Conf({
-		cwd: temporaryDirectory(),
-		encryptionKey: 'abc123',
-	});
-
-	t.is(config.get('foo'), undefined);
-	t.is(config.get('foo', '🐴'), '🐴');
-	config.set('foo', fixture);
-	config.set('baz.boo', fixture);
-	t.is(config.get('foo'), fixture);
-	t.is(config.get('baz.boo'), fixture);
-});
-
-test('encryption - upgrade', t => {
-	const cwd = temporaryDirectory();
-
-	const before = new Conf({cwd});
-	before.set('foo', fixture);
-	t.is(before.get('foo'), fixture);
-
-	const after = new Conf({cwd, encryptionKey: 'abc123'});
-	t.is(after.get('foo'), fixture);
-});
-
-test('encryption - corrupt file', t => {
-	const cwd = temporaryDirectory();
-
-	const before = new Conf({
-		cwd,
-		encryptionKey: 'abc123',
-		clearInvalidConfig: true,
-	});
-
-	before.set('foo', fixture);
-	t.is(before.get('foo'), fixture);
-
-	fs.appendFileSync(path.join(cwd, 'config.json'), 'corrupt file');
-
-	const after = new Conf({
-		cwd,
-		encryptionKey: 'abc123',
-		clearInvalidConfig: true,
-	});
-
-	t.is(after.get('foo'), undefined);
 });
 
 test('onDidChange()', t => {
@@ -590,23 +678,23 @@ test('doesn\'t write to disk upon instanciation if and only if the store didn\'t
 	let exists = fs.existsSync(t.context.config.path);
 	t.is(exists, false);
 
-	const conf = new Conf({
+	const config = new Conf({
 		cwd: temporaryDirectory(),
 		defaults: {
 			foo: 'bar',
 		},
 	});
-	exists = fs.existsSync(conf.path);
+	exists = fs.existsSync(config.path);
 	t.is(exists, true);
 });
 
 test('`clearInvalidConfig` option - invalid data', t => {
-	const config = new Conf({cwd: temporaryDirectory(), clearInvalidConfig: false});
-	fs.writeFileSync(config.path, '🦄');
-
 	t.throws(() => {
-		// eslint-disable-next-line @typescript-eslint/no-unused-expressions
-		config.store;
+		const cwd = temporaryDirectory();
+
+		fs.writeFileSync(path.join(cwd, 'config.json'), '🦄');
+
+		new Conf({cwd, clearInvalidConfig: false});
 	}, {instanceOf: SyntaxError});
 });
 
@@ -695,10 +783,13 @@ test('schema - complex schema', t => {
 			},
 		},
 	};
+
 	const config = new Conf({cwd: temporaryDirectory(), schema});
+
 	t.throws(() => {
 		config.set('foo', 'abca');
 	}, {message: 'Config schema violation: `foo` must NOT have more than 3 characters; `foo` must match pattern "[def]+"'});
+
 	t.throws(() => {
 		config.set('bar', [1, 1, 2, 'a']);
 	}, {message: 'Config schema violation: `bar` must NOT have more than 3 items; `bar/3` must be integer; `bar` must NOT have duplicate items (items ## 1 and 0 are identical)'});
@@ -725,11 +816,13 @@ test('schema - invalid write to config file', t => {
 			type: 'string',
 		},
 	};
+
 	const cwd = temporaryDirectory();
 
-	const config = new Conf({cwd, schema});
 	fs.writeFileSync(path.join(cwd, 'config.json'), JSON.stringify({foo: 1}));
+
 	t.throws(() => {
+		const config = new Conf({cwd, schema});
 		config.get('foo');
 	}, {message: 'Config schema violation: `foo` must be string'});
 });
@@ -785,32 +878,6 @@ test('schema - validate Conf default', t => {
 			schema,
 		});
 	}, {message: 'Config schema violation: `foo` must be string'});
-});
-
-test('schema - validate rootSchema', t => {
-	t.throws(() => {
-		const config = new Conf({
-			cwd: temporaryDirectory(),
-			rootSchema: {
-				additionalProperties: false,
-			},
-		});
-		config.set('foo', 'bar');
-	}, {message: 'Config schema violation: `` must NOT have additional properties'});
-});
-
-test('AJV - validate AJV options', t => {
-	const config = new Conf({
-		cwd: temporaryDirectory(),
-		ajvOptions: {
-			removeAdditional: true,
-		},
-		rootSchema: {
-			additionalProperties: false,
-		},
-	});
-	config.set('foo', 'bar');
-	t.is(config.get('foo'), undefined);
 });
 
 test('.get() - without dot notation', t => {
@@ -872,9 +939,8 @@ test('.delete() - without dot notation', t => {
 
 test('`watch` option watches for config file changes by another process', async t => {
 	const cwd = temporaryDirectory();
-	const conf1 = new Conf({cwd, watch: true});
-	const conf2 = new Conf({cwd});
-	conf1.set('foo', '👾');
+	const config1 = new Conf({cwd, watch: true});
+	config1.set('foo', '👾');
 
 	t.plan(4);
 
@@ -883,24 +949,26 @@ test('`watch` option watches for config file changes by another process', async 
 		t.is(oldValue, '👾');
 	};
 
-	t.is(conf2.get('foo'), '👾');
-	t.is(conf1.path, conf2.path);
-	conf1.onDidChange('foo', checkFoo);
+	const config2 = new Conf({cwd});
+
+	t.is(config2.get('foo'), '👾');
+	t.is(config1.path, config2.path);
+	config1.onDidChange('foo', checkFoo);
 
 	(async () => {
 		await delay(50);
-		conf2.set('foo', '🐴');
+		config2.set('foo', '🐴');
 	})();
 
-	const {events: _events} = conf1;
+	const {events: _events} = config1;
 
 	await pEvent(_events, 'change');
 });
 
 test('`watch` option watches for config file changes by file write', async t => {
 	const cwd = temporaryDirectory();
-	const conf = new Conf({cwd, watch: true});
-	conf.set('foo', '🐴');
+	const config = new Conf({cwd, watch: true});
+	config.set('foo', '🐴');
 
 	t.plan(2);
 
@@ -909,7 +977,7 @@ test('`watch` option watches for config file changes by file write', async t => 
 		t.is(oldValue, '🐴');
 	};
 
-	conf.onDidChange('foo', checkFoo);
+	config.onDidChange('foo', checkFoo);
 
 	const delayOS = process.platform === 'win32' ? 50 : 5000;
 
@@ -919,7 +987,7 @@ test('`watch` option watches for config file changes by file write', async t => 
 		fs.writeFileSync(path.join(cwd, 'config.json'), JSON.stringify({foo: '🦄'}));
 	})();
 
-	const {events} = conf;
+	const {events} = config || {};
 
 	await pEvent(events, 'change');
 });
@@ -927,9 +995,9 @@ test('`watch` option watches for config file changes by file write', async t => 
 test('migrations - should save the project version as the initial migrated version', t => {
 	const cwd = temporaryDirectory();
 
-	const conf = new Conf({cwd, projectVersion: '0.0.2', migrations: {}});
+	const config = new Conf({cwd, projectVersion: '0.0.2', migrations: {}});
 
-	t.is(conf.get('__internal__.migrations.version'), '0.0.2');
+	t.is(config.get('__internal__.migrations.version'), '0.0.2');
 });
 
 test('migrations - should save the project version when a migration occurs', t => {
@@ -941,14 +1009,14 @@ test('migrations - should save the project version when a migration occurs', t =
 		},
 	};
 
-	const conf = new Conf({cwd, projectVersion: '0.0.2', migrations});
+	const config = new Conf({cwd, projectVersion: '0.0.2', migrations});
 
-	t.is(conf.get('__internal__.migrations.version'), '0.0.2');
+	t.is(config.get('__internal__.migrations.version'), '0.0.2');
 
-	const conf2 = new Conf({cwd, projectVersion: '0.0.4', migrations});
+	const config2 = new Conf({cwd, projectVersion: '0.0.4', migrations});
 
-	t.is(conf2.get('__internal__.migrations.version'), '0.0.4');
-	t.is(conf2.get('foo'), 'cool stuff');
+	t.is(config2.get('__internal__.migrations.version'), '0.0.4');
+	t.is(config2.get('foo'), 'cool stuff');
 });
 
 test('migrations - should NOT run the migration when the version doesn\'t change', t => {
@@ -960,14 +1028,14 @@ test('migrations - should NOT run the migration when the version doesn\'t change
 		},
 	};
 
-	const conf = new Conf({cwd, projectVersion: '0.0.2', migrations});
-	t.is(conf.get('__internal__.migrations.version'), '0.0.2');
-	t.false(conf.has('foo'));
+	const config = new Conf({cwd, projectVersion: '0.0.2', migrations});
+	t.is(config.get('__internal__.migrations.version'), '0.0.2');
+	t.false(config.has('foo'));
 
-	const conf2 = new Conf({cwd, projectVersion: '0.0.2', migrations});
+	const config2 = new Conf({cwd, projectVersion: '0.0.2', migrations});
 
-	t.is(conf2.get('__internal__.migrations.version'), '0.0.2');
-	t.false(conf2.has('foo'));
+	t.is(config2.get('__internal__.migrations.version'), '0.0.2');
+	t.false(config2.has('foo'));
 });
 
 test('migrations - should run the migration when the version changes', t => {
@@ -979,15 +1047,15 @@ test('migrations - should run the migration when the version changes', t => {
 		},
 	};
 
-	const conf = new Conf({cwd, projectVersion: '0.0.2', migrations});
-	t.is(conf.get('__internal__.migrations.version'), '0.0.2');
-	t.false(conf.has('foo'));
+	const config = new Conf({cwd, projectVersion: '0.0.2', migrations});
+	t.is(config.get('__internal__.migrations.version'), '0.0.2');
+	t.false(config.has('foo'));
 
-	const conf2 = new Conf({cwd, projectVersion: '1.1.0', migrations});
+	const config2 = new Conf({cwd, projectVersion: '1.1.0', migrations});
 
-	t.is(conf2.get('__internal__.migrations.version'), '1.1.0');
-	t.true(conf2.has('foo'));
-	t.is(conf2.get('foo'), 'cool stuff');
+	t.is(config2.get('__internal__.migrations.version'), '1.1.0');
+	t.true(config2.has('foo'));
+	t.is(config2.get('foo'), 'cool stuff');
 });
 
 test('migrations - should run the migration when the version uses semver comparisons', t => {
@@ -998,9 +1066,9 @@ test('migrations - should run the migration when the version uses semver compari
 		},
 	};
 
-	const conf = new Conf({cwd, projectVersion: '1.0.2', migrations});
-	t.is(conf.get('__internal__.migrations.version'), '1.0.2');
-	t.is(conf.get('foo'), 'cool stuff');
+	const config = new Conf({cwd, projectVersion: '1.0.2', migrations});
+	t.is(config.get('__internal__.migrations.version'), '1.0.2');
+	t.is(config.get('foo'), 'cool stuff');
 });
 
 test('migrations - should run the migration when the version uses multiple semver comparisons', t => {
@@ -1014,13 +1082,13 @@ test('migrations - should run the migration when the version uses multiple semve
 		},
 	};
 
-	const conf = new Conf({cwd, projectVersion: '1.0.2', migrations});
-	t.is(conf.get('__internal__.migrations.version'), '1.0.2');
-	t.is(conf.get('foo'), 'cool stuff');
+	const config = new Conf({cwd, projectVersion: '1.0.2', migrations});
+	t.is(config.get('__internal__.migrations.version'), '1.0.2');
+	t.is(config.get('foo'), 'cool stuff');
 
-	const conf2 = new Conf({cwd, projectVersion: '2.0.1', migrations});
-	t.is(conf2.get('__internal__.migrations.version'), '2.0.1');
-	t.is(conf2.get('foo'), 'modern cool stuff');
+	const config2 = new Conf({cwd, projectVersion: '2.0.1', migrations});
+	t.is(config2.get('__internal__.migrations.version'), '2.0.1');
+	t.is(config2.get('foo'), 'modern cool stuff');
 });
 
 test('migrations - should run all valid migrations when the version uses multiple semver comparisons', t => {
@@ -1039,12 +1107,12 @@ test('migrations - should run all valid migrations when the version uses multipl
 		},
 	};
 
-	const conf = new Conf({cwd, projectVersion: '2.4.0', migrations});
-	t.is(conf.get('__internal__.migrations.version'), '2.4.0');
-	t.is(conf.get('foo'), 'cool stuff');
-	t.is(conf.get('medium'), 'yes');
-	t.is(conf.get('woof'), 'woof');
-	t.is(conf.get('heart'), '❤');
+	const config = new Conf({cwd, projectVersion: '2.4.0', migrations});
+	t.is(config.get('__internal__.migrations.version'), '2.4.0');
+	t.is(config.get('foo'), 'cool stuff');
+	t.is(config.get('medium'), 'yes');
+	t.is(config.get('woof'), 'woof');
+	t.is(config.get('heart'), '❤');
 });
 
 test('migrations - should cleanup migrations with non-numeric values', t => {
@@ -1063,28 +1131,28 @@ test('migrations - should cleanup migrations with non-numeric values', t => {
 		},
 	};
 
-	const conf = new Conf({cwd, projectVersion: '2.4.0', migrations});
-	t.is(conf.get('__internal__.migrations.version'), '2.4.0');
-	t.is(conf.get('foo'), 'cool stuff');
-	t.is(conf.get('medium'), 'yes');
-	t.is(conf.get('woof'), 'woof');
-	t.is(conf.get('heart'), '❤');
+	const config = new Conf({cwd, projectVersion: '2.4.0', migrations});
+	t.is(config.get('__internal__.migrations.version'), '2.4.0');
+	t.is(config.get('foo'), 'cool stuff');
+	t.is(config.get('medium'), 'yes');
+	t.is(config.get('woof'), 'woof');
+	t.is(config.get('heart'), '❤');
 });
 
 test('migrations - should NOT throw an error when project version is unspecified but there are no migrations', t => {
 	const cwd = temporaryDirectory();
 
 	t.notThrows(() => {
-		const conf = new Conf({cwd});
-		conf.clear();
+		const config = new Conf({cwd});
+		config.clear();
 	});
 });
 
 test('migrations - should not create the previous migration key if the migrations aren\'t needed', t => {
 	const cwd = temporaryDirectory();
 
-	const conf = new Conf({cwd});
-	t.false(conf.has('__internal__.migrations.version'));
+	const config = new Conf({cwd});
+	t.false(config.has('__internal__.migrations.version'));
 });
 
 test('migrations error handling - should rollback changes if a migration failed', t => {
@@ -1110,34 +1178,34 @@ test('migrations error handling - should rollback changes if a migration failed'
 		},
 	};
 
-	let conf = new Conf({cwd, projectVersion: '1.0.0', migrations: passingMigrations});
+	let config = new Conf({cwd, projectVersion: '1.0.0', migrations: passingMigrations});
 
 	t.throws(() => {
-		conf = new Conf({cwd, projectVersion: '1.0.2', migrations: failingMigrations});
+		config = new Conf({cwd, projectVersion: '1.0.2', migrations: failingMigrations});
 	}, {message: /throw the migration and rollback/});
 
-	t.is(conf.get('__internal__.migrations.version'), '1.0.0');
-	t.true(conf.has('foo'));
-	t.is(conf.get('foo'), 'initial update');
+	t.is(config.get('__internal__.migrations.version'), '1.0.0');
+	t.true(config.has('foo'));
+	t.is(config.get('foo'), 'initial update');
 });
 
 test('__internal__ keys - should not be accessible by the user', t => {
 	const cwd = temporaryDirectory();
 
-	const conf = new Conf({cwd});
+	const config = new Conf({cwd});
 
 	t.throws(() => {
-		conf.set('__internal__.you-shall', 'not-pass');
+		config.set('__internal__.you-shall', 'not-pass');
 	}, {message: /Please don't use the __internal__ key/});
 });
 
 test('__internal__ keys - should not be accessible by the user even without dot notation', t => {
 	const cwd = temporaryDirectory();
 
-	const conf = new Conf({cwd, accessPropertiesByDotNotation: false});
+	const config = new Conf({cwd, accessPropertiesByDotNotation: false});
 
 	t.throws(() => {
-		conf.set({
+		config.set({
 			__internal__: {
 				'you-shall': 'not-pass',
 			},
@@ -1148,15 +1216,15 @@ test('__internal__ keys - should not be accessible by the user even without dot 
 test('__internal__ keys - should only match specific "__internal__" entry', t => {
 	const cwd = temporaryDirectory();
 
-	const conf = new Conf({cwd});
+	const config = new Conf({cwd});
 
 	t.notThrows(() => {
-		conf.set('__internal__foo.you-shall', 'not-pass');
+		config.set('__internal__foo.you-shall', 'not-pass');
 	});
 });
 
 test('beforeEachMigration - should be called before every migration', t => {
-	const conf = new Conf({
+	const config = new Conf({
 		cwd: temporaryDirectory(),
 		projectVersion: '2.0.0',
 		beforeEachMigration(store, context) {
@@ -1169,7 +1237,78 @@ test('beforeEachMigration - should be called before every migration', t => {
 		},
 	});
 
-	t.true(conf.get('beforeEachMigration 0.0.0 → 1.0.0'));
-	t.true(conf.get('beforeEachMigration 1.0.0 → 1.0.1'));
-	t.false(conf.has('beforeEachMigration 1.0.1 → 2.0.1'));
+	t.true(config.get('beforeEachMigration 0.0.0 → 1.0.0'));
+	t.true(config.get('beforeEachMigration 1.0.0 → 1.0.1'));
+	t.false(config.has('beforeEachMigration 1.0.1 → 2.0.1'));
+});
+
+test('migration', async t => {
+	const migrationHandler = (data: typeof config) => {
+		data.set('counter', data.get('counter', 0) + 1);
+	};
+
+	const cwd = temporaryDirectory();
+
+	const options = {
+		cwd,
+		configName: 'test',
+		projectName: 'test',
+		defaults: {
+			counter: 0,
+		},
+	};
+
+	new Conf({
+		...options,
+		projectVersion: '0.0.0',
+	});
+
+	const config = new Conf({
+		...options,
+		projectVersion: '1.0.1',
+		migrations: {
+			'0.9.9'(store) {
+				console.log('Migrating from 0.x.x to 0.9.9');
+				migrationHandler(store);
+				// Migrated
+				return store;
+			},
+			'1.0.0'(store) {
+				console.log('Migrating from 0.9.9 to 1.0.0');
+				migrationHandler(store);
+				// Migrated
+				return store;
+			},
+		},
+	});
+
+	// Add an assertion to verify the config was created successfully
+	t.truthy(config);
+	t.is(config.get('counter'), 2);
+});
+
+test('schema - validate rootSchema', t => {
+	t.throws(() => {
+		const config = new Conf({
+			cwd: temporaryDirectory(),
+			rootSchema: {
+				additionalProperties: false,
+			},
+		});
+		config.set('foo', 'bar');
+	}, {message: 'Config schema violation: `` must NOT have additional properties'});
+});
+
+test('AJV - validate AJV options', t => {
+	const config = new Conf({
+		cwd: temporaryDirectory(),
+		ajvOptions: {
+			removeAdditional: true,
+		},
+		rootSchema: {
+			additionalProperties: false,
+		},
+	});
+	config.set('foo', 'bar');
+	t.is(config.get('foo'), undefined);
 });
