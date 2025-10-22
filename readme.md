@@ -381,6 +381,20 @@ Default: `false`
 
 Watch for any changes in the config file and call the callback for `onDidChange` or `onDidAnyChange` if set. This is useful if there are multiple processes changing the same config file.
 
+#### writeTimeout
+
+type: `number`
+Default: 0
+
+Rate limit disk write I/O to once per [x]ms
+
+#### changeTimeout
+
+type: `number`
+Default: 0
+
+Rate limit change events to once per [x]ms
+
 #### configFileMode
 
 Type: `number`
