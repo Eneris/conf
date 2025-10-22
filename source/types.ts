@@ -275,6 +275,7 @@ export type Options<T extends Record<string, any>> = {
 	readonly configFileMode?: number;
 
 	readonly writeTimeout?: number;
+	readonly changeTimeout?: number;
 };
 
 export type Migrations<T extends Record<string, any>> = Record<string, (store: Conf<T>) => void>;

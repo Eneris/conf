@@ -1312,3 +1312,61 @@ test('AJV - validate AJV options', t => {
 	config.set('foo', 'bar');
 	t.is(config.get('foo'), undefined);
 });
+
+test('Rapid save test', async t => {
+	const cwd = temporaryDirectory();
+	const config = new Conf({cwd, changeTimeout: 100});
+
+	const iterations = 100;
+
+	let saves = 0;
+	const unsubscribe = config.onDidAnyChange(() => {
+		saves += 1;
+	});
+
+	for (let i = 0; i < iterations; i++) {
+		config.set('counter', i);
+	}
+
+	// Add an assertion to verify the config was created successfully
+	t.truthy(config);
+	t.is(config.get('counter'), iterations - 1);
+	t.is(saves, 1);
+
+	unsubscribe();
+});
+
+test('Rapid save test - async', async t => {
+	const cwd = temporaryDirectory();
+	const config = new Conf({cwd, changeTimeout: 100});
+	const iterations = 100;
+
+	let counter = 0;
+	let saves = 0;
+
+	const unsubscribe = config.onDidAnyChange(() => {
+		saves += 1;
+	});
+
+	for (let i = 0; i < iterations; i++) {
+		counter = i;
+		config.set('counter', counter);
+	}
+
+	performance.mark('delay');
+
+	await delay(0);
+
+	config.set('counter', ++counter);
+
+	const measurement = performance.measure('delay');
+
+	await delay(200);
+
+	// Add an assertion to verify the config was created successfully
+	t.truthy(config);
+	t.is(config.get('counter'), counter);
+	t.is(saves, measurement.duration > 100 ? 3 : 2);
+
+	unsubscribe();
+});
