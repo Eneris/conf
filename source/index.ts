@@ -63,6 +63,8 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	readonly #options: Readonly<Partial<Options<T>>>;
 	readonly #defaultValues: Partial<T> = {};
 
+	#changeTimeout?: NodeJS.Timeout;
+	#changePreventedBecauseOfTimeout = false;
 	#writeTimer?: NodeJS.Timeout;
 	#cache: T = null as unknown as T;
 	#writePending = false;
@@ -77,6 +79,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			accessPropertiesByDotNotation: true,
 			configFileMode: 0o666,
 			writeTimeout: 0,
+			changeTimeout: 0,
 			...partialOptions,
 		};
 
@@ -525,7 +528,24 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 
 		this._write(value);
+
+		if (this.#changeTimeout && this.#options.changeTimeout) {
+			this.#changePreventedBecauseOfTimeout = true;
+			return;
+		}
+
 		this.events.dispatchEvent(new Event('change'));
+
+		if (this.#options.changeTimeout) {
+			this.#changeTimeout = setTimeout(() => {
+				this.#changeTimeout = undefined;
+
+				if (this.#changePreventedBecauseOfTimeout) {
+					this.#changePreventedBecauseOfTimeout = false;
+					this.events.dispatchEvent(new Event('change'));
+				}
+			}, this.#options.changeTimeout);
+		}
 	}
 
 	* [Symbol.iterator](): IterableIterator<[keyof T, T[keyof T]]> {
