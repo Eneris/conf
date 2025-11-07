@@ -529,24 +529,16 @@ describe('Conf', () => {
 	});
 
 	it('.clear() - validation error', () => {
-		// Test that clear() validates default values and throws for invalid JSON types
-		// Note: Invalid defaults can be set during construction but cause errors when used
-		const store = new Conf({
-			cwd: createTempDirectory(),
-			defaults: {
-				foo: 42,
-				bad() {}, // Invalid JSON type
-			},
-		});
-
-		// Constructor succeeds, but invalid default is not included in store
-		assert.strictEqual(store.get('foo'), 42);
-		assert.strictEqual(store.get('bad' as any), undefined);
-
-		// Clear() should validate defaults and throw for invalid types
+		// Test that invalid defaults cause an error during construction
 		assert.throws(() => {
-			store.clear();
-		}, {message: /not supported by JSON/});
+			new Conf({
+				cwd: createTempDirectory(),
+				defaults: {
+					foo: 42,
+					bad() {}, // Invalid JSON type
+				},
+			});
+		}, {message: /Invalid defaults/});
 	});
 
 	it('.size', () => {
@@ -663,6 +655,7 @@ describe('Conf', () => {
 		assert.deepStrictEqual(conf.store, createNullProtoObject({}));
 		conf.store = deserialized;
 		assert.deepStrictEqual(conf.store, createNullProtoObject(deserialized));
+		conf.clearCache(); // Reload to trigger deserialize
 		assert.strictEqual(serializeCallCount, 1);
 		assert.strictEqual(deserializeCallCount, 1);
 	});
@@ -1097,7 +1090,7 @@ describe('Conf', () => {
 
 		assert.throws(() => {
 			// eslint-disable-next-line @typescript-eslint/no-unused-expressions
-			conf.store;
+			conf.clearCache();
 		}, {name: 'SyntaxError'});
 	});
 
@@ -1352,7 +1345,7 @@ describe('Conf', () => {
 		fs.writeFileSync(schemaPath, JSON.stringify({foo: 1}));
 		fs.statSync(schemaPath);
 		assert.throws(() => {
-			conf.get('foo');
+			conf.clearCache();
 		}, {message: 'Config schema violation: `foo` must be string'});
 	});
 

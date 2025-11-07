@@ -51,6 +51,10 @@ const isSupportedEncryptionAlgorithm = (value: unknown): value is EncryptionAlgo
 
 const createPlainObject = <T = Record<string, unknown>>(): T => Object.create(null);
 
+// Minimal wrapper: clone and assign to null-prototype object
+const cloneWithNullProto = <T>(value: T): T =>
+	Object.assign(createPlainObject(), structuredClone(value));
+
 const isExist = <T = unknown>(data: T): boolean => data !== undefined;
 
 const checkValueType = (key: string, value: unknown): void => {
@@ -77,11 +81,15 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	readonly #encryptionKey?: string | Uint8Array | NodeJS.TypedArray | DataView;
 	readonly #encryptionAlgorithm: EncryptionAlgorithm;
 	readonly #options: Readonly<Partial<Options<T>>>;
-	readonly #defaultValues: Partial<T> = {};
+	readonly #defaultValues: Partial<T> = createPlainObject();
 	#isInMigration = false;
 	#watcher?: fs.FSWatcher;
 	#watchFile?: boolean;
 	#debouncedChangeHandler?: () => void;
+
+	#cache?: T;
+	#writePending = false;
+	#writeTimer?: NodeJS.Timeout;
 
 	constructor(partialOptions: Readonly<Partial<Options<T>>> = {}) {
 		const options = this.#prepareOptions(partialOptions);
@@ -98,6 +106,15 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		if (options.watch) {
 			this._watch();
 		}
+	}
+
+	clearCache(): void {
+		if (this.#writePending) {
+			return;
+		}
+
+		this.#cache &&= undefined;
+		this._read();
 	}
 
 	/**
@@ -229,19 +246,17 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	@param mutation - Function which returns new derived value
 	@returns new value
 	*/
-	mutate<Key extends keyof T>(key: Key, mutation: (currentValue: T[Key]) => T[Key]): void;
-	mutate<Key extends DotNotationKeyOf<T>>(key: Key, mutation: (currentValue: DotNotationValueOf<T, Key>) => DotNotationValueOf<T, Key>): void;
+	mutate<Key extends keyof T, V extends T[Key] extends ReadonlyArray<infer U> ? U : unknown>(key: Key, mutation: (currentValue: V) => V): void;
+	mutate<Key extends DotNotationKeyOf<T>, V extends DotNotationValueOf<T, Key> extends ReadonlyArray<infer U> ? U : unknown>(key: Key, mutation: (currentValue: V) => V): void;
 	mutate(key: string, mutation: unknown): void {
-	// mutate<Key extends keyof T>(key: Key | string, mutation: (currentValue: T[Key]) => T[Key]): T[Key] {
 		if (typeof mutation !== 'function') {
 			throw new TypeError(`Expected type of mutation to be of type \`function\`, is ${typeof mutation}`);
 		}
 
-		this.set(key, mutation(this.get(key)));
+		this.set(key, mutation.call(this.get(key)));
 
 		return this.get(key);
 	}
-
 
 	/**
 	Reset items to their default values, as defined by the `defaults` or `schema` option.
@@ -287,7 +302,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 		for (const key of Object.keys(this.#defaultValues)) {
 			if (isExist(this.#defaultValues[key])) {
-				checkValueType(key, this.#defaultValues[key]);
+				// No need to validate - defaults are already validated in #applyDefaultValues
 				if (this.#options.accessPropertiesByDotNotation) {
 					setProperty(newStore as Record<string, any>, key, this.#defaultValues[key]);
 				} else {
@@ -356,44 +371,11 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	```
 	*/
 	get store(): T {
-		try {
-			const data = fs.readFileSync(this.path, this.#encryptionKey ? null : 'utf8');
-			const dataString = this._decryptData(data);
-			const parseStore = (value: string): T => {
-				const deserializedData = this._deserialize(value);
-				if (!this.#isInMigration) {
-					this._validate(deserializedData);
-				}
-
-				return Object.assign(createPlainObject(), deserializedData);
-			};
-
-			return parseStore(dataString);
-		} catch (error: unknown) {
-			if ((error as any)?.code === 'ENOENT') {
-				this._ensureDirectory();
-				return createPlainObject();
-			}
-
-			if (this.#options.clearInvalidConfig) {
-				const errorInstance = error as Error;
-				// Handle JSON parsing errors (existing behavior)
-				if (errorInstance.name === 'SyntaxError') {
-					return createPlainObject();
-				}
-
-				// Handle schema validation errors (new behavior)
-				if (errorInstance.message?.startsWith('Config schema violation:')) {
-					return createPlainObject();
-				}
-
-				if (errorInstance.message === 'Failed to decrypt config data.') {
-					return createPlainObject();
-				}
-			}
-
-			throw error;
+		if (!this.#cache) {
+			this._read();
 		}
+
+		return cloneWithNullProto(this.#cache!);
 	}
 
 	set store(value: T) {
@@ -564,22 +546,20 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		};
 	}
 
-	private _deserialize: Deserialize<T> = value => {
-		const decrypt = this.#options.encryption?.decrypt;
-		const data = decrypt ? this.#options.encryption?.decrypt(Uint8Array.from(value)) : value;
-		const deserialize = this.#options.deserialize;
+	private readonly _deserialize: Deserialize<T> = value => {
+		const {deserialize, encryption} = this.#options;
+		const data = encryption ? encryption.decrypt(Uint8Array.from(value)) : value;
 
 		return deserialize ? deserialize(data) : JSON.parse(data);
-	}
+	};
 
-	private _serialize: Serialize<T> = value => {
-		const encrypt = this.#options.encryption?.encrypt;
-		const serialize = this.#options.serialize;
+	private readonly _serialize: Serialize<T> = value => {
+		const {serialize, encryption} = this.#options;
 
 		const data = serialize ? serialize(value) : JSON.stringify(value, undefined, '\t');
 
-		return encrypt ? encrypt(data).toString() : data;
-	}
+		return encryption ? encryption.encrypt(data).toString() : data;
+	};
 
 	private _validate(data: T | unknown): void {
 		if (!this.#validator) {
@@ -601,8 +581,60 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		fs.mkdirSync(path.dirname(this.path), {recursive: true});
 	}
 
+	private _read(): void {
+		try {
+			const data = fs.readFileSync(this.path, this.#encryptionKey ? null : 'utf8');
+			const dataString = this._decryptData(data);
+			const deserializedData = this._deserialize(dataString);
+
+			if (!this.#isInMigration) {
+				this._validate(deserializedData);
+			}
+
+			this.#cache = Object.assign(createPlainObject(), deserializedData);
+		} catch (error: unknown) {
+			if ((error as any)?.code === 'ENOENT') {
+				this._ensureDirectory();
+				this.#cache = createPlainObject();
+				return;
+			}
+
+			if (this.#options.clearInvalidConfig) {
+				const errorInstance = error as Error;
+				// Handle JSON parsing errors (existing behavior)
+				if (errorInstance.name === 'SyntaxError') {
+					this.#cache = createPlainObject();
+					return;
+				}
+
+				// Handle schema validation errors (new behavior)
+				if (errorInstance.message?.startsWith('Config schema violation:')) {
+					this.#cache = createPlainObject();
+					return;
+				}
+			}
+
+			throw error;
+		}
+	}
+
 	private _write(value: T): void {
-		let data: string | Uint8Array = this._serialize(value);
+		// Write change to memory right away
+		// Deep clone with regular prototype, convert to null-prototype only when returning via getter
+		this.#cache = structuredClone(value);
+
+		if (this.#writeTimer) {
+			this.#writePending = true;
+		} else {
+			this._forceWrite();
+			this._startWriteTimeout();
+		}
+	}
+
+	private _forceWrite(): void {
+		this._cancelWriteTimeout();
+
+		let data: string | Uint8Array = this._serialize(this.#cache!);
 
 		const encryptionKey = this.#encryptionKey;
 		if (encryptionKey) {
@@ -640,6 +672,29 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 	}
 
+	private _startWriteTimeout() {
+		this._cancelWriteTimeout();
+
+		if (this.#options?.writeTimeout) {
+			this.#writeTimer = setTimeout(() => {
+				this.#writeTimer = undefined;
+
+				if (this.#writePending) {
+					this.#writePending = false;
+					this._forceWrite();
+				}
+			}, this.#options.writeTimeout);
+		}
+	}
+
+	private _cancelWriteTimeout() {
+		if (this.#writeTimer) {
+			clearTimeout(this.#writeTimer);
+			this.#writeTimer = undefined;
+			this.#writePending = false;
+		}
+	}
+
 	private _watch(): void {
 		this._ensureDirectory();
 
@@ -650,6 +705,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		// Use fs.watch on Windows and macOS, fs.watchFile on Linux for better reliability
 		if (process.platform === 'win32' || process.platform === 'darwin') {
 			this.#debouncedChangeHandler ??= debounceFn(() => {
+				this.clearCache();
 				this.events.dispatchEvent(new Event('change'));
 			}, {wait: 100});
 
@@ -669,6 +725,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		} else {
 			// Fs.watchFile is used on Linux for better cross-platform reliability
 			this.#debouncedChangeHandler ??= debounceFn(() => {
+				this.clearCache();
 				this.events.dispatchEvent(new Event('change'));
 			}, {wait: 1000});
 
@@ -687,7 +744,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		const newerVersions = Object.keys(migrations)
 			.filter(candidateVersion => this._shouldPerformMigration(candidateVersion, previousMigratedVersion, versionToMigrate));
 
-		let storeBackup = structuredClone(this.store);
+		let storeBackup = cloneWithNullProto(this.store);
 
 		for (const version of newerVersions) {
 			try {
@@ -706,7 +763,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 				this._set(MIGRATION_KEY, version);
 
 				previousMigratedVersion = version;
-				storeBackup = structuredClone(this.store);
+				storeBackup = cloneWithNullProto(this.store);
 			} catch (error: unknown) {
 				// Restore backup (validation is skipped during migration)
 				this.store = storeBackup;
@@ -760,6 +817,10 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	private _shouldPerformMigration(candidateVersion: string, previousMigratedVersion: string, versionToMigrate: string): boolean {
+		if (!previousMigratedVersion) {
+			return false;
+		}
+
 		if (this._isVersionInRangeFormat(candidateVersion)) {
 			if (previousMigratedVersion !== '0.0.0' && semver.satisfies(previousMigratedVersion, candidateVersion)) {
 				return false;
@@ -800,6 +861,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			clearInvalidConfig: false,
 			accessPropertiesByDotNotation: true,
 			configFileMode: 0o666,
+			writeTimeout: 0,
 			...partialOptions,
 		};
 
@@ -875,18 +937,20 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 	#applyDefaultValues(options: Partial<Options<T>>): void {
 		if (options.defaults) {
+			// Validate defaults by attempting to structuredClone them
+			// This will throw if they contain invalid types like functions
+			try {
+				structuredClone(options.defaults);
+			} catch (error) {
+				throw new TypeError(`Invalid defaults: ${(error as Error).message}`);
+			}
+
 			Object.assign(this.#defaultValues, options.defaults);
 		}
 	}
 
 	#configureSerialization(options: Partial<Options<T>>): void {
-		// if (options.serialize) {
-		// 	this._serialize = options.serialize;
-		// }
-
-		// if (options.deserialize) {
-		// 	this._deserialize = options.deserialize;
-		// }
+		// Nothing to do
 	}
 
 	#resolvePath(options: Partial<Options<T>>): string {
@@ -903,7 +967,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 
 		const fileStore = this.store;
-		const storeWithDefaults = Object.assign(createPlainObject(), options.defaults ?? {}, fileStore);
+		const storeWithDefaults = Object.assign(createPlainObject(), this.#defaultValues, fileStore);
 		this._validate(storeWithDefaults);
 		try {
 			assert.deepEqual(fileStore, storeWithDefaults);
@@ -925,7 +989,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		this.#isInMigration = true;
 		try {
 			const fileStore = this.store;
-			const storeWithDefaults = Object.assign(createPlainObject(), options.defaults ?? {}, fileStore);
+			const storeWithDefaults = Object.assign(createPlainObject(), this.#defaultValues, fileStore);
 			try {
 				assert.deepEqual(fileStore, storeWithDefaults);
 			} catch {
