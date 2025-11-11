@@ -342,6 +342,29 @@ describe('Conf', () => {
 		assert.deepStrictEqual(config.get('multi'), ['a', 'b', 'c']);
 	});
 
+	it('.merge()', () => {
+		config.set('merge', {a: 1, b: 2});
+		config.merge('merge', {b: 3, c: 4});
+		assert.deepStrictEqual(config.get('merge'), {a: 1, b: 3, c: 4});
+	});
+
+	it('.merge() - invalid target', () => {
+		config.set('notObject', 'string value');
+		assert.throws(() => {
+			config.merge('notObject', 42);
+		}, {message: /Cannot merge into non-object value at key `notObject`/});
+
+		config.set('alsoNotObject', 42);
+		assert.throws(() => {
+			config.merge('alsoNotObject', 42);
+		}, {message: /Cannot merge into non-object value at key `alsoNotObject`/});
+
+		config.set('thisIsArray', [1, 2, 3]);
+		assert.throws(() => {
+			config.merge('thisIsArray', 42);
+		}, {message: /Cannot merge into non-object value at key `thisIsArray`/});
+	});
+
 	it('.mutate()', () => {
 		config.set('count', 10);
 		// @ts-ignore
