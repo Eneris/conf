@@ -4,8 +4,8 @@ import path from 'node:path';
 import process from 'node:process';
 import {describe, it} from 'node:test';
 import assert from 'node:assert/strict';
+import {setTimeout} from 'node:timers/promises';
 import {pEvent} from 'p-event';
-import delay from 'delay';
 import Conf from '../source/index.js';
 import {
 	createMigrationTest,
@@ -151,7 +151,7 @@ describe('Advanced Features', () => {
 			checks++;
 		};
 
-		await delay(50);
+		await setTimeout(50);
 
 		assert.strictEqual(conf2.get('foo'), undefined);
 		assert.strictEqual(conf1.path, conf2.path);
@@ -159,7 +159,7 @@ describe('Advanced Features', () => {
 
 		const changePromise = pEvent(conf1.events, 'change', {timeout: 3000});
 
-		await delay(50);
+		await setTimeout(50);
 		conf2.set('foo', '🐴');
 
 		await changePromise;
@@ -190,7 +190,7 @@ describe('Advanced Features', () => {
 
 		const changePromise = pEvent(conf.events, 'change', {timeout: 3000});
 
-		await delay(50);
+		await setTimeout(50);
 		const writePath = path.join(cwd, 'config.json');
 		fs.writeFileSync(writePath, JSON.stringify({foo: '🦄'}));
 		fs.statSync(writePath);
@@ -225,5 +225,107 @@ describe('Advanced Features', () => {
 
 		conf._closeWatcher();
 		writer._closeWatcher();
+	});
+
+	it('.runAtomicChange()', async () => {
+		if (process.env.CI) {
+			// Skip file watcher tests in CI - file system events may not work reliably
+			return;
+		}
+
+		const cwd = createTempDirectory();
+		const config = trackConf(new Conf({cwd}));
+
+		config.set('count', 0);
+		let changeCalled = 0;
+		const unsubscribe = config.onDidChange('count', () => {
+			changeCalled++;
+		});
+
+		await config.runAtomicChange(() => {
+			for (let i = 0; i < 5; i++) {
+				// @ts-ignore
+				config.mutate('count', (current: number) => current + 1);
+			}
+		});
+
+		unsubscribe();
+		assert.strictEqual(changeCalled, 1);
+		assert.strictEqual(config.get('count'), 5);
+	});
+
+	it('.setAtomicChangeLock()', async () => {
+		if (process.env.CI) {
+			// Skip file watcher tests in CI - file system events may not work reliably
+			return;
+		}
+
+		const cwd = createTempDirectory();
+		const config = trackConf(new Conf({cwd}));
+
+		config.set('count', 0);
+		let changeCalled = 0;
+		const unsubscribe = config.onDidChange('count', () => {
+			changeCalled++;
+		});
+
+		const lock = await config.setAtomicChangeLock();
+
+		for (let i = 0; i < 5; i++) {
+			// @ts-ignore
+			config.mutate('count', (current: number) => current + 1);
+		}
+
+		lock.resolve();
+
+		unsubscribe();
+		assert.strictEqual(changeCalled, 0);
+		assert.strictEqual(config.get('count'), 5);
+	});
+
+	it('.setAtomicChangeLock() with existing lock', async () => {
+		if (process.env.CI) {
+			// Skip file watcher tests in CI - file system events may not work reliably
+			return;
+		}
+
+		const cwd = createTempDirectory();
+		const config = trackConf(new Conf({cwd}));
+		config.set('count', 0);
+
+		let changeCalled = 0;
+		const unsubscribe = config.onDidChange('count', () => {
+			changeCalled++;
+		});
+
+		const firstLock = await config.setAtomicChangeLock();
+
+		for (let i = 0; i < 5; i++) {
+			// @ts-ignore
+			config.mutate('count', (current: number) => current + 1);
+		}
+
+		firstLock.resolve();
+		const secondLock = await config.setAtomicChangeLock();
+
+		assert.strictEqual(changeCalled, 1);
+		assert.strictEqual(config.get('count'), 5);
+
+		for (let i = 0; i < 5; i++) {
+			// @ts-ignore
+			config.mutate('count', (current: number) => current + 1);
+		}
+
+		// Data changed but no change event yet
+		assert.strictEqual(changeCalled, 1);
+		assert.strictEqual(config.get('count'), 10);
+
+		secondLock.resolve();
+
+		await setTimeout(50); // Allow time for any changes to propagate
+
+		unsubscribe();
+		assert.strictEqual(changeCalled, 2);
+		assert.strictEqual(config.get('count'), 10);
 	});
 });
