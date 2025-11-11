@@ -90,6 +90,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	#cache?: T;
 	#writePending = false;
 	#writeTimer?: NodeJS.Timeout;
+	#atomicChangeLock?: PromiseWithResolvers<void>;
 
 	constructor(partialOptions: Readonly<Partial<Options<T>>> = {}) {
 		const options = this.#prepareOptions(partialOptions);
@@ -425,7 +426,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 
 		this._write(value);
-		this.events.dispatchEvent(new Event('change'));
+		this.triggerChangeEvent();
 	}
 
 	* [Symbol.iterator](): IterableIterator<[keyof T, T[keyof T]]> {
@@ -433,6 +434,36 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			if (!this._isReservedKeyPath(key)) {
 				yield [key, value];
 			}
+		}
+	}
+
+	async setAtomicChangeLock(): Promise<PromiseWithResolvers<void>> {
+		if (!this.#atomicChangeLock) {
+			const value = Promise.withResolvers<void>();
+
+			// eslint-disable-next-line promise/prefer-await-to-then -- makes no sense here
+			value.promise.finally(() => {
+				this.#atomicChangeLock = undefined;
+				this.triggerChangeEvent();
+			});
+
+			this.#atomicChangeLock = value;
+
+			return this.#atomicChangeLock;
+		}
+
+		await this.#atomicChangeLock.promise;
+
+		return this.setAtomicChangeLock();
+	}
+
+	async runAtomicChange(handler: () => void | Promise<void>): Promise<void> {
+		const lock = await this.setAtomicChangeLock();
+
+		try {
+			await handler.call(this);
+		} finally {
+			lock.resolve();
 		}
 	}
 
@@ -451,6 +482,12 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 
 		this.#debouncedChangeHandler = undefined;
+	}
+
+	triggerChangeEvent(): void {
+		if (!this.#atomicChangeLock) {
+			this.events.dispatchEvent(new Event('change'));
+		}
 	}
 
 	private _decryptData(data: string | Uint8Array): string {
@@ -728,7 +765,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		if (process.platform === 'win32' || process.platform === 'darwin') {
 			this.#debouncedChangeHandler ??= debounceFn(() => {
 				this.clearCache();
-				this.events.dispatchEvent(new Event('change'));
+				this.triggerChangeEvent();
 			}, {wait: 100});
 
 			// Watch the directory instead of the file to handle atomic writes (rename events)
@@ -748,7 +785,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			// Fs.watchFile is used on Linux for better cross-platform reliability
 			this.#debouncedChangeHandler ??= debounceFn(() => {
 				this.clearCache();
-				this.events.dispatchEvent(new Event('change'));
+				this.triggerChangeEvent();
 			}, {wait: 1000});
 
 			fs.watchFile(this.path, {persistent: false}, (_current, _previous) => {
