@@ -68,6 +68,7 @@ const MIGRATION_KEY = `${INTERNAL_KEY}.migrations.version`;
 export default class Conf<T extends Record<string, any> = Record<string, unknown>> implements Iterable<[keyof T, T[keyof T]]> {
 	readonly path: string;
 	readonly events: EventTarget;
+	ignoreChangeEvents = false;
 	#validator?: AjvValidateFunction;
 	readonly #encryptionKey?: string | Uint8Array | NodeJS.TypedArray | DataView;
 	readonly #options: Readonly<Partial<Options<T>>>;
@@ -426,20 +427,12 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 	}
 
-	get ignoreChangeEvents(): boolean {
-		return this.#ignoreChangeEvents;
-	}
-
-	set ignoreChangeEvents(value: boolean) {
-		this.#ignoreChangeEvents = Boolean(value);
-	}
-
 	async runWithoutChangeEvents(handler: () => void | Promise<void>): Promise<void> {
 		try {
-			this.ignoreChangeEvents = true;
+			this.#ignoreChangeEvents = true;
 			await handler.call(this);
 		} finally {
-			this.ignoreChangeEvents = false;
+			this.#ignoreChangeEvents = this.ignoreChangeEvents;
 			this.triggerChangeEvent();
 		}
 	}
@@ -462,7 +455,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	triggerChangeEvent(): void {
-		if (!this.ignoreChangeEvents) {
+		if (!this.#ignoreChangeEvents && !this.ignoreChangeEvents) {
 			this.events.dispatchEvent(new Event('change'));
 		}
 	}
