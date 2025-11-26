@@ -274,7 +274,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			throw new TypeError(`Cannot merge into non-object value at key \`${String(key)}\``);
 		}
 
-		if (typeof value !== 'object' || value === null) {
+		if (!value || Array.isArray(value) || typeof value !== 'object') {
 			throw new TypeError(`Cannot merge non-object value into key \`${String(key)}\``);
 		}
 
