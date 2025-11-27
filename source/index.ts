@@ -98,6 +98,10 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 	}
 
+	get currentAtomicChangeLock(): PromiseWithResolvers<void> | undefined {
+		return this.#atomicChangeLock;
+	}
+
 	clearCache(): void {
 		if (this.#writePending) {
 			return;
@@ -426,7 +430,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 	}
 
-	async setAtomicChangeLock(): Promise<PromiseWithResolvers<void>> {
+	async setAtomicChangeLock(waitForPrevious = true): Promise<PromiseWithResolvers<void>> {
 		if (!this.#atomicChangeLock) {
 			const value = Promise.withResolvers<void>();
 
@@ -438,6 +442,10 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 			this.#atomicChangeLock = value;
 
+			return this.#atomicChangeLock;
+		}
+
+		if (!waitForPrevious) {
 			return this.#atomicChangeLock;
 		}
 
