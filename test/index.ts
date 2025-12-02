@@ -350,6 +350,11 @@ describe('Conf', () => {
 
 	it('.merge() - invalid target', () => {
 		config.set('notObject', 'string value');
+
+		config.merge('notDefined', {a: 1});
+
+		assert.deepEqual(config.get('notDefined'), {a: 1});
+
 		assert.throws(() => {
 			config.merge('notObject', 42);
 		}, {message: /Cannot merge into non-object value at key `notObject`/});

@@ -272,7 +272,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	// Fallback for dynamic dot-notation paths that can't be statically typed
 	merge(key: string, value: unknown): void;
 	merge<Key extends keyof T>(key: string, value?: unknown): void {
-		const current = this.get(key);
+		const current = this.get(key) ?? {};
 
 		if (!current || Array.isArray(current) || typeof current !== 'object') {
 			throw new TypeError(`Cannot merge into non-object value at key \`${String(key)}\``);
