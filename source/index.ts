@@ -107,8 +107,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			return;
 		}
 
-		this.#cache &&= undefined;
-		this._read();
+		this.#cache = this._read();
 	}
 
 	/**
@@ -387,11 +386,9 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	```
 	*/
 	get store(): T {
-		if (!this.#cache) {
-			this._read();
-		}
+		this.#cache ??= this._read();
 
-		return cloneWithNullProto(this.#cache!);
+		return cloneWithNullProto(this.#cache);
 	}
 
 	set store(value: T) {
@@ -401,9 +398,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		if (!hasProperty(value, INTERNAL_KEY)) {
 			try {
 				// Read directly from file to avoid recursion during migration
-				const data = fs.readFileSync(this.path, this.#encryptionKey ? null : 'utf8');
-				const dataString = this._decryptData(data);
-				const currentStore = this._deserialize(dataString);
+				const currentStore = this._read();
 				if (hasProperty(currentStore, INTERNAL_KEY)) {
 					setProperty(value, INTERNAL_KEY, getProperty(currentStore, INTERNAL_KEY));
 				}
@@ -597,7 +592,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		fs.mkdirSync(path.dirname(this.path), {recursive: true});
 	}
 
-	private _read(): void {
+	private _read(): T {
 		try {
 			const data = fs.readFileSync(this.path, this.#encryptionKey ? null : 'utf8');
 			const dataString = this._decryptData(data);
@@ -607,26 +602,23 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 				this._validate(deserializedData);
 			}
 
-			this.#cache = Object.assign(createPlainObject(), deserializedData);
+			return Object.assign(createPlainObject(), deserializedData);
 		} catch (error: unknown) {
 			if ((error as any)?.code === 'ENOENT') {
 				this._ensureDirectory();
-				this.#cache = createPlainObject();
-				return;
+				return createPlainObject();
 			}
 
 			if (this.#options.clearInvalidConfig) {
 				const errorInstance = error as Error;
 				// Handle JSON parsing errors (existing behavior)
 				if (errorInstance.name === 'SyntaxError') {
-					this.#cache = createPlainObject();
-					return;
+					return createPlainObject();
 				}
 
 				// Handle schema validation errors (new behavior)
 				if (errorInstance.message?.startsWith('Config schema violation:')) {
-					this.#cache = createPlainObject();
-					return;
+					return createPlainObject();
 				}
 			}
 
