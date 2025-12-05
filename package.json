@@ -20,9 +20,11 @@
 		"node": ">=20"
 	},
 	"scripts": {
-		"test": "xo && tsc --noEmit && tsx --test test/**.ts",
+		"test": "xo && tsc --noEmit",
+		"test:electron": "node test/electron-tests.mjs",
+		"test:all": "yarn test && yarn test:electron",
 		"build": "del-cli dist && tsc",
-		"prepare": "npm run build"
+		"prepare": "yarn build"
 	},
 	"files": [
 		"dist/source"
@@ -63,6 +65,7 @@
 		"@types/semver": "^7.7.1",
 		"del": "^8.0.1",
 		"del-cli": "^7.0.0",
+		"electron": "^39.2.5",
 		"expect-type": "^1.2.2",
 		"p-event": "^7.0.0",
 		"tempy": "^3.1.0",
