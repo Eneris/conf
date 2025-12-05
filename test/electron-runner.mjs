@@ -5,6 +5,7 @@
  */
 
 import {app} from 'electron';
+import process from 'node:process';
 
 const testFile = process.env.TEST_FILE;
 const testName = process.env.TEST_NAME;
@@ -21,20 +22,20 @@ if (app.dock) {
 
 app.on('ready', async () => {
 	let hasError = false;
-	
+
 	try {
 		// Import the test module
 		const testModule = await import(testFile);
-		
+
 		// Wait for app to be ready
 		await app.whenReady();
-		
+
 		// Run the specific test
 		const testFn = testModule[testName];
 		if (!testFn) {
 			throw new Error(`Test "${testName}" not found in ${testFile}`);
 		}
-		
+
 		await testFn();
 		console.log(`✔ ${testName}`);
 	} catch (error) {
@@ -42,7 +43,7 @@ app.on('ready', async () => {
 		console.log(`✖ ${testName}`);
 		console.error(`  Error: ${error.message}`);
 	}
-	
+
 	// Force exit
 	const exitCode = hasError ? 1 : 0;
 	app.exit(exitCode);

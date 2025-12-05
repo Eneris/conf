@@ -698,7 +698,6 @@ describe('Conf', () => {
 	it('encryption', () => {
 		const conf = new Conf({
 			cwd: createTempDirectory(),
-			encryptionKey: 'abc123',
 		});
 
 		assert.strictEqual(conf.get('foo'), undefined);
@@ -716,7 +715,7 @@ describe('Conf', () => {
 		before.set('foo', fixture);
 		assert.strictEqual(before.get('foo'), fixture);
 
-		const after = new Conf({cwd, encryptionKey: 'abc123'});
+		const after = new Conf({cwd: 'abc123'});
 		assert.strictEqual(after.get('foo'), fixture);
 	});
 
@@ -725,7 +724,6 @@ describe('Conf', () => {
 
 		const before = new Conf({
 			cwd,
-			encryptionKey: 'abc123',
 			clearInvalidConfig: true,
 		});
 
@@ -736,7 +734,6 @@ describe('Conf', () => {
 
 		const after = new Conf({
 			cwd,
-			encryptionKey: 'abc123',
 			clearInvalidConfig: true,
 		});
 
@@ -751,7 +748,6 @@ describe('Conf', () => {
 
 		const before = new Conf({
 			cwd,
-			encryptionKey: 'enc-schema',
 			schema,
 			clearInvalidConfig: true,
 		});
@@ -763,7 +759,6 @@ describe('Conf', () => {
 
 		const after = new Conf({
 			cwd,
-			encryptionKey: 'enc-schema',
 			schema,
 			clearInvalidConfig: true,
 		});
@@ -910,7 +905,6 @@ describe('Conf', () => {
 		fs.statSync(conf.path);
 
 		assert.throws(() => {
-			// eslint-disable-next-line @typescript-eslint/no-unused-expressions
 			conf.clearCache();
 		}, {name: 'SyntaxError'});
 	});

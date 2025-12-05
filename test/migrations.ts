@@ -616,7 +616,7 @@ describe('Migrations', () => {
 
 			// Disabled since cache layer defeats purpose of test
 			// TODO: Add dynamic option to disable cache for datasets that are too large
-			// eslint-disable-next-line @stylistic/indent
+
 			// assert.ok(memIncrease < 200, `Memory increase too high: ${memIncrease.toFixed(2)}MB`);
 
 			// Verify transformation completed

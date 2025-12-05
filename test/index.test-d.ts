@@ -1,5 +1,4 @@
 /* eslint-disable no-new, @typescript-eslint/naming-convention */
-import {stringToUint8Array} from 'uint8array-extras';
 import {expectTypeOf} from 'expect-type';
 import Conf from '../source/index.js';
 
@@ -37,19 +36,15 @@ new Conf<UnicornFoo>({
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
-	encryptionKey: '',
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
-	encryptionKey: stringToUint8Array(''),
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
-	encryptionKey: new Uint8Array([1]),
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
-	encryptionKey: new DataView(new ArrayBuffer(2)),
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
