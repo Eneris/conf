@@ -736,7 +736,6 @@ describe('Conf', () => {
 	it('encryption', () => {
 		const conf = new Conf({
 			cwd: createTempDirectory(),
-			encryptionKey: 'abc123',
 		});
 
 		assert.strictEqual(conf.get('foo'), undefined);
@@ -886,23 +885,8 @@ describe('Conf', () => {
 		const config = new Conf({cwd});
 		config.set('foo', fixture);
 
-		assert.throws(() => {
-			new Conf({
-				cwd,
-				encryptionKey: 'abc123',
-				encryptionAlgorithm: 'aes-256-ctr',
-			});
-		});
-	});
-
-	it('encryption - aes-256-cbc - plaintext upgrade succeeds', () => {
-		const cwd = createTempDirectory();
-		const configPath = path.join(cwd, 'config.json');
-
-		fs.writeFileSync(configPath, JSON.stringify({foo: fixture}, null, '\t'));
-
-		const config = new Conf({cwd, encryptionKey: 'abc123'});
-		assert.strictEqual(config.get('foo'), fixture);
+		const after = new Conf({cwd});
+		assert.strictEqual(after.get('foo'), fixture);
 	});
 
 	it('encryption - corrupt file', () => {
@@ -910,7 +894,6 @@ describe('Conf', () => {
 
 		const before = new Conf({
 			cwd,
-			encryptionKey: 'abc123',
 			clearInvalidConfig: true,
 		});
 
@@ -921,7 +904,6 @@ describe('Conf', () => {
 
 		const after = new Conf({
 			cwd,
-			encryptionKey: 'abc123',
 			clearInvalidConfig: true,
 		});
 
@@ -958,7 +940,6 @@ describe('Conf', () => {
 
 		const before = new Conf({
 			cwd,
-			encryptionKey: 'enc-schema',
 			schema,
 			clearInvalidConfig: true,
 		});
@@ -970,7 +951,6 @@ describe('Conf', () => {
 
 		const after = new Conf({
 			cwd,
-			encryptionKey: 'enc-schema',
 			schema,
 			clearInvalidConfig: true,
 		});
@@ -1117,7 +1097,6 @@ describe('Conf', () => {
 		fs.statSync(conf.path);
 
 		assert.throws(() => {
-			// eslint-disable-next-line @typescript-eslint/no-unused-expressions
 			conf.clearCache();
 		}, {name: 'SyntaxError'});
 	});
@@ -1345,7 +1324,7 @@ describe('Conf', () => {
 				},
 			},
 		};
-		const conf = new Conf({cwd: createTempDirectory(), schema});
+		const conf = new Conf({cwd: createTempDirectory(), schema, writeTimeout: 0});
 		assert.throws(() => {
 			conf.set('foo', 'abca');
 		}, {message: 'Config schema violation: `foo` must NOT have more than 3 characters; `foo` must match pattern "[def]+"'});
@@ -1362,6 +1341,61 @@ describe('Conf', () => {
 		assert.throws(() => {
 			conf.set('foo', 'bar');
 		}, {message: 'Config schema violation: `foo` must match format "uri"'});
+	});
+
+	it('schema - validation failure preserves internal properties', () => {
+		const cwd = createTempDirectory();
+		const schema: Schema<{foo: string; bar: number}> = {
+			foo: {
+				type: 'string',
+				maxLength: 5,
+			},
+			bar: {
+				type: 'number',
+				minimum: 0,
+			},
+		};
+
+		// Create config with migrations to ensure internal properties exist
+		const conf = new Conf({
+			cwd,
+			schema,
+			projectVersion: '1.0.0',
+			migrations: {
+				'1.0.0'(store) {
+					store.set('foo', 'test');
+				},
+			},
+		});
+
+		// Verify migration was applied and internal data exists
+		assert.strictEqual(conf.get('foo'), 'test');
+		const internalBefore = conf.get('__internal__');
+		assert.ok(internalBefore);
+		assert.strictEqual((internalBefore as any).migrations.version, '1.0.0');
+
+		// Try to set an invalid value that should fail validation
+		assert.throws(() => {
+			conf.set('foo', 'this is way too long');
+		}, {message: 'Config schema violation: `foo` must NOT have more than 5 characters'});
+
+		// Verify internal properties are still preserved after validation failure
+		const internalAfter = conf.get('__internal__');
+		assert.ok(internalAfter);
+		assert.strictEqual((internalAfter as any).migrations.version, '1.0.0');
+
+		// Verify the store wasn't corrupted - old value should remain
+		assert.strictEqual(conf.get('foo'), 'test');
+
+		// Try another invalid operation
+		assert.throws(() => {
+			conf.set('bar', -10);
+		}, {message: 'Config schema violation: `bar` must be >= 0'});
+
+		// Verify internal properties still exist
+		const internalFinal = conf.get('__internal__');
+		assert.ok(internalFinal);
+		assert.strictEqual((internalFinal as any).migrations.version, '1.0.0');
 	});
 
 	it('schema - invalid write to config file', () => {

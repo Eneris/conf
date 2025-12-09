@@ -19,11 +19,6 @@ import debounceFn from 'debounce-fn';
 import semver from 'semver';
 import {type JSONSchema} from 'json-schema-typed';
 import {
-	concatUint8Arrays,
-	stringToUint8Array,
-	uint8ArrayToString,
-} from 'uint8array-extras';
-import {
 	type Deserialize,
 	type Migrations,
 	type OnDidChangeCallback,
@@ -37,17 +32,6 @@ import {
 	type PartialObjectDeep,
 	type Schema,
 } from './types.js';
-
-type EncryptionAlgorithm = NonNullable<Options<Record<string, unknown>>['encryptionAlgorithm']>;
-
-const defaultEncryptionAlgorithm: EncryptionAlgorithm = 'aes-256-cbc';
-const supportedEncryptionAlgorithms = new Set<EncryptionAlgorithm>([
-	'aes-256-cbc',
-	'aes-256-gcm',
-	'aes-256-ctr',
-]);
-
-const isSupportedEncryptionAlgorithm = (value: unknown): value is EncryptionAlgorithm => typeof value === 'string' && supportedEncryptionAlgorithms.has(value as EncryptionAlgorithm);
 
 const createPlainObject = <T = Record<string, unknown>>(): T => Object.create(null);
 
@@ -78,8 +62,6 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	readonly path: string;
 	readonly events: EventTarget;
 	#validator?: AjvValidateFunction;
-	readonly #encryptionKey?: string | Uint8Array | NodeJS.TypedArray | DataView;
-	readonly #encryptionAlgorithm: EncryptionAlgorithm;
 	readonly #options: Readonly<Partial<Options<T>>>;
 	readonly #defaultValues: Partial<T> = createPlainObject();
 	#isInMigration = false;
@@ -88,6 +70,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	#debouncedChangeHandler?: () => void;
 
 	#cache?: T;
+	#internalBackup?: Record<string, unknown>;
 	#writePending = false;
 	#writeTimer?: NodeJS.Timeout;
 	#atomicChangeLock?: PromiseWithResolvers<void>;
@@ -99,8 +82,6 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		this.#applyDefaultValues(options);
 		this.#configureSerialization(options);
 		this.events = new EventTarget();
-		this.#encryptionKey = options.encryptionKey;
-		this.#encryptionAlgorithm = options.encryptionAlgorithm ?? defaultEncryptionAlgorithm;
 		this.path = this.#resolvePath(options);
 		this.#initializeStore(options);
 
@@ -118,7 +99,6 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			return;
 		}
 
-		this.#cache &&= undefined;
 		this._read();
 	}
 
@@ -308,6 +288,10 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	delete<Key extends keyof T>(key: Key): void;
 	delete<Key extends DotNotationKeyOf<T>>(key: Key): void;
 	delete(key: string): void {
+		if (this._isReservedKeyPath(key)) {
+			throw new Error(`The key \`${key}\` is reserved and cannot be deleted`);
+		}
+
 		const {store} = this;
 		if (this.#options.accessPropertiesByDotNotation) {
 			deleteProperty(store, key);
@@ -406,18 +390,13 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	set store(value: T) {
-		this._ensureDirectory();
-
 		// Preserve existing internal data if it exists and the new value doesn't contain it
-		if (!hasProperty(value, INTERNAL_KEY)) {
+		if (hasProperty(value, INTERNAL_KEY)) {
+			this.#internalBackup = getProperty(value, INTERNAL_KEY);
+		} else if (this.#internalBackup) {
 			try {
 				// Read directly from file to avoid recursion during migration
-				const data = fs.readFileSync(this.path, this.#encryptionKey ? null : 'utf8');
-				const dataString = this._decryptData(data);
-				const currentStore = this._deserialize(dataString);
-				if (hasProperty(currentStore, INTERNAL_KEY)) {
-					setProperty(value, INTERNAL_KEY, getProperty(currentStore, INTERNAL_KEY));
-				}
+				setProperty(value, INTERNAL_KEY, this.#internalBackup);
 			} catch {
 				// Silently ignore errors when trying to preserve internal data
 				// This could happen if the file doesn't exist yet or is corrupted
@@ -425,6 +404,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			}
 		}
 
+		// Validate before updating cache to ensure cache is never left in invalid state
 		if (!this.#isInMigration) {
 			this._validate(value);
 		}
@@ -498,72 +478,53 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		}
 	}
 
-	private _decryptData(data: string | Uint8Array): string {
-		const encryptionKey = this.#encryptionKey;
-		if (!encryptionKey) {
-			return typeof data === 'string' ? data : uint8ArrayToString(data);
-		}
+	writeToDisk(): void {
+		this._cancelWriteTimeout();
 
-		// Check if an initialization vector has been used to encrypt the data.
-		const encryptionAlgorithm = this.#encryptionAlgorithm;
-		const authenticationTagLength = encryptionAlgorithm === 'aes-256-gcm' ? 16 : 0;
-		const separatorCodePoint = ':'.codePointAt(0);
-		const separatorByte = typeof data === 'string' ? data.codePointAt(16) : data[16];
-		const hasSeparator = separatorCodePoint !== undefined && separatorByte === separatorCodePoint;
-		if (!hasSeparator) {
-			if (encryptionAlgorithm === 'aes-256-cbc') {
-				return typeof data === 'string' ? data : uint8ArrayToString(data);
-			}
+		// Validation already done in _write(), no need to validate again here
+		const data: string | Uint8Array = this._encryptData(this._serialize(this.#cache ?? createPlainObject<T>()));
 
-			throw new Error('Failed to decrypt config data.');
-		}
+		this._ensureDirectory();
 
-		const getEncryptedPayload = (dataUpdate: Uint8Array): {ciphertext: Uint8Array; authenticationTag?: Uint8Array} => {
-			if (authenticationTagLength === 0) {
-				return {ciphertext: dataUpdate};
-			}
-
-			const authenticationTagStart = dataUpdate.length - authenticationTagLength;
-			if (authenticationTagStart < 0) {
-				throw new Error('Invalid authentication tag length.');
-			}
-
-			return {
-				ciphertext: dataUpdate.slice(0, authenticationTagStart),
-				authenticationTag: dataUpdate.slice(authenticationTagStart),
-			};
-		};
-
-		const initializationVector = data.slice(0, 16);
-		const slice = data.slice(17);
-		const dataUpdate = typeof slice === 'string' ? stringToUint8Array(slice) : slice;
-
-		const decrypt = (salt: string | Uint8Array): string => {
-			const {ciphertext, authenticationTag} = getEncryptedPayload(dataUpdate);
-			const password = crypto.pbkdf2Sync(encryptionKey, salt, 10_000, 32, 'sha512');
-			const decipher = crypto.createDecipheriv(encryptionAlgorithm, password, initializationVector);
-
-			if (authenticationTag) {
-				(decipher as crypto.DecipherGCM).setAuthTag(authenticationTag);
-			}
-
-			return uint8ArrayToString(concatUint8Arrays([decipher.update(ciphertext), decipher.final()]));
-		};
-
-		try {
-			return decrypt(initializationVector);
-		} catch {
+		// Temporary workaround for Conf being packaged in a Ubuntu Snap app.
+		// See https://github.com/sindresorhus/conf/pull/82
+		if (process.env.SNAP) {
+			fs.writeFileSync(this.path, data, {mode: this.#options.configFileMode});
+		} else {
 			try {
-				// Fallback to legacy scheme (iv.toString() as salt)
-				return decrypt(initializationVector.toString());
-			} catch {}
+				atomicWriteFileSync(this.path, data, {mode: this.#options.configFileMode});
+			} catch (error: unknown) {
+				// Fix for https://github.com/sindresorhus/electron-store/issues/106
+				// Sometimes on Windows, we will get an EXDEV error when atomic writing
+				// (even though to the same directory), so we fall back to non atomic write
+				if ((error as any)?.code === 'EXDEV') {
+					fs.writeFileSync(this.path, data, {mode: this.#options.configFileMode});
+					return;
+				}
+
+				throw error;
+			}
+		}
+	}
+
+	private _decryptData(data: string | Buffer): string {
+		const {encryption} = this.#options;
+
+		if (!encryption) {
+			return data.toString();
 		}
 
-		if (encryptionAlgorithm === 'aes-256-cbc') {
-			return typeof data === 'string' ? data : uint8ArrayToString(data);
+		return encryption.decrypt(typeof data === 'string' ? Buffer.from(data) : data);
+	}
+
+	private _encryptData(data: string): Buffer {
+		const {encryption} = this.#options;
+
+		if (!encryption) {
+			return Buffer.from(data);
 		}
 
-		throw new Error('Failed to decrypt config data.');
+		return encryption.encrypt(data);
 	}
 
 	private _handleStoreChange(callback: OnDidAnyChangeCallback<T>): Unsubscribe {
@@ -614,18 +575,15 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	private readonly _deserialize: Deserialize<T> = value => {
-		const {deserialize, encryption} = this.#options;
-		const data = encryption ? encryption.decrypt(Uint8Array.from(value)) : value;
+		const {deserialize} = this.#options;
 
-		return deserialize ? deserialize(data) : JSON.parse(data);
+		return deserialize ? deserialize(value) : JSON.parse(value);
 	};
 
 	private readonly _serialize: Serialize<T> = value => {
-		const {serialize, encryption} = this.#options;
+		const {serialize} = this.#options;
 
-		const data = serialize ? serialize(value) : JSON.stringify(value, undefined, '\t');
-
-		return encryption ? encryption.encrypt(data).toString() : data;
+		return serialize ? serialize(value) : JSON.stringify(value, undefined, '\t');
 	};
 
 	private _validate(data: T | unknown): void {
@@ -649,8 +607,10 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	private _read(): void {
+		this.#internalBackup = undefined;
+
 		try {
-			const data = fs.readFileSync(this.path, this.#encryptionKey ? null : 'utf8');
+			const data = fs.readFileSync(this.path);
 			const dataString = this._decryptData(data);
 			const deserializedData = this._deserialize(dataString);
 
@@ -659,6 +619,8 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			}
 
 			this.#cache = Object.assign(createPlainObject(), deserializedData);
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+			this.#internalBackup = this.#cache[INTERNAL_KEY] ?? undefined;
 		} catch (error: unknown) {
 			if ((error as any)?.code === 'ENOENT') {
 				this._ensureDirectory();
@@ -693,49 +655,8 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		if (this.#writeTimer) {
 			this.#writePending = true;
 		} else {
-			this._forceWrite();
+			this.writeToDisk();
 			this._startWriteTimeout();
-		}
-	}
-
-	private _forceWrite(): void {
-		this._cancelWriteTimeout();
-
-		let data: string | Uint8Array = this._serialize(this.#cache!);
-
-		const encryptionKey = this.#encryptionKey;
-		if (encryptionKey) {
-			const initializationVector = crypto.randomBytes(16);
-			const password = crypto.pbkdf2Sync(encryptionKey, initializationVector, 10_000, 32, 'sha512');
-			const cipher = crypto.createCipheriv(this.#encryptionAlgorithm, password, initializationVector);
-			const encryptedData = concatUint8Arrays([cipher.update(stringToUint8Array(data)), cipher.final()]);
-			const encryptedParts = [initializationVector, stringToUint8Array(':'), encryptedData];
-
-			if (this.#encryptionAlgorithm === 'aes-256-gcm') {
-				encryptedParts.push((cipher as crypto.CipherGCM).getAuthTag());
-			}
-
-			data = concatUint8Arrays(encryptedParts);
-		}
-
-		// Temporary workaround for Conf being packaged in a Ubuntu Snap app.
-		// See https://github.com/sindresorhus/conf/pull/82
-		if (process.env.SNAP) {
-			fs.writeFileSync(this.path, data, {mode: this.#options.configFileMode});
-		} else {
-			try {
-				atomicWriteFileSync(this.path, data, {mode: this.#options.configFileMode});
-			} catch (error: unknown) {
-				// Fix for https://github.com/sindresorhus/electron-store/issues/106
-				// Sometimes on Windows, we will get an EXDEV error when atomic writing
-				// (even though to the same directory), so we fall back to non atomic write
-				if ((error as any)?.code === 'EXDEV') {
-					fs.writeFileSync(this.path, data, {mode: this.#options.configFileMode});
-					return;
-				}
-
-				throw error;
-			}
 		}
 	}
 
@@ -748,7 +669,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 				if (this.#writePending) {
 					this.#writePending = false;
-					this._forceWrite();
+					this.writeToDisk();
 				}
 			}, this.#options.writeTimeout);
 		}

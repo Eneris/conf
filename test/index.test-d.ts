@@ -1,5 +1,4 @@
 /* eslint-disable no-new, @typescript-eslint/naming-convention */
-import {stringToUint8Array} from 'uint8array-extras';
 import {expectTypeOf} from 'expect-type';
 import {temporaryDirectory} from 'tempy';
 import Conf, {type Options} from '../source/index.js';
@@ -45,23 +44,15 @@ new Conf<UnicornFoo>({
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
-	cwd: temporaryDirectory(),
-	encryptionKey: '',
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
-	cwd: temporaryDirectory(),
-	encryptionKey: stringToUint8Array(''),
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
-	cwd: temporaryDirectory(),
-	encryptionKey: new Uint8Array([1]),
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
-	cwd: temporaryDirectory(),
-	encryptionKey: new DataView(new ArrayBuffer(2)),
 });
 const encryptionAlgorithmOptions = {
 	projectName: typeTestProjectName,

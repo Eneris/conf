@@ -173,20 +173,9 @@ export type Options<T extends Record<string, unknown>> = {
 	*/
 	cwd?: string;
 
-	/**
-	Note that this is __not intended for security purposes__, since the encryption key would be easily found inside a plain-text Node.js app.
-
-	Its main use is for obscurity. If a user looks through the config directory and finds the config file, since it's just a JSON file, they may be tempted to modify it. By providing an encryption key, the file will be obfuscated, which should hopefully deter any users from doing so.
-
-	When using `aes-256-gcm`, the config file is authenticated. If the file is changed in any way, the decryption will fail. With `aes-256-cbc` and `aes-256-ctr`, tampering can go undetected.
-
-	When specified, the store will be encrypted using the `encryptionAlgorithm` option (defaults to `aes-256-cbc`).
-	*/
-	encryptionKey?: string | Uint8Array | NodeJS.TypedArray | DataView;
-
 	encryption?: {
-		encrypt: (data: string) => Uint8Array;
-		decrypt: (data: Uint8Array) => string;
+		encrypt: (data: string) => Buffer;
+		decrypt: (data: Buffer) => string;
 	};
 
 	/**
