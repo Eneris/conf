@@ -208,8 +208,8 @@ describe('Advanced Features', () => {
 		}
 
 		const cwd = createTempDirectory();
-		const conf = trackConf(new Conf({cwd, watch: true, encryptionKey: 'secret-key'}));
-		const writer = trackConf(new Conf({cwd, encryptionKey: 'secret-key'}));
+		const conf = trackConf(new Conf({cwd, watch: true}));
+		const writer = trackConf(new Conf({cwd}));
 		writer.set('foo', 'bar');
 
 		const changePromise = pEvent(conf.events, 'change', {timeout: 3000});
