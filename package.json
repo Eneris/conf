@@ -20,7 +20,9 @@
 		"node": ">=20"
 	},
 	"scripts": {
-		"test": "xo && tsc --noEmit && tsx --test test/**.ts",
+		"test": "xo && tsc --noEmit && tsx --test test/index.ts test/migrations.ts test/advanced-features.ts",
+		"test:electron": "node test/electron-tests.mjs",
+		"test:all": "yarn test && yarn test:electron",
 		"build": "del-cli dist && tsc",
 		"prepare": "npm run build"
 	},
@@ -54,8 +56,7 @@
 		"dot-prop": "^10.0.0",
 		"env-paths": "^3.0.0",
 		"json-schema-typed": "^8.0.1",
-		"semver": "^7.7.3",
-		"uint8array-extras": "^1.5.0"
+		"semver": "^7.7.3"
 	},
 	"devDependencies": {
 		"@sindresorhus/tsconfig": "^8.1.0",
@@ -63,6 +64,7 @@
 		"@types/semver": "^7.7.1",
 		"del": "^8.0.1",
 		"del-cli": "^7.0.0",
+		"electron": ">=39.2.5",
 		"expect-type": "^1.2.2",
 		"p-event": "^7.0.0",
 		"tempy": "^3.1.0",
@@ -75,7 +77,9 @@
 		"rules": {
 			"@typescript-eslint/ban-ts-comment": "off",
 			"unicorn/prevent-abbreviations": "off",
-			"@typescript-eslint/no-floating-promises": "off"
+			"@typescript-eslint/no-floating-promises": "off",
+			"n/prefer-global/buffer": "off",
+			"@typescript-eslint/no-restricted-types": "off"
 		}
 	}
 }
