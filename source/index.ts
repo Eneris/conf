@@ -74,6 +74,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	#writePending = false;
 	#writeTimer?: NodeJS.Timeout;
 	#atomicChangeLock?: PromiseWithResolvers<void>;
+	#lastUpdate = Date.now();
 
 	constructor(partialOptions: Readonly<Partial<Options<T>>> = {}) {
 		const options = this.#prepareOptions(partialOptions);
@@ -652,6 +653,8 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		// Deep clone with regular prototype, convert to null-prototype only when returning via getter
 		this.#cache = structuredClone(value);
 
+		this.#lastUpdate = Date.now();
+
 		if (this.#writeTimer) {
 			this.#writePending = true;
 		} else {
@@ -839,6 +842,16 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		setProperty(store, key, value);
 
 		this.store = store;
+	}
+
+	/**
+	 * Timestamp of the last successful update of this instance's configuration.
+	 *
+	 * This value is refreshed whenever the underlying store is written or
+	 * updated (for example, after persisting configuration changes to disk).
+	 */
+	get lastUpdate() {
+		return this.#lastUpdate;
 	}
 
 	#prepareOptions(partialOptions: Readonly<Partial<Options<T>>>): Partial<Options<T>> {
