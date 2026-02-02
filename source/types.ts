@@ -113,7 +113,7 @@ export type Options<T extends Record<string, unknown>> = {
 	projectName?: string;
 
 	/**
-	__Required if you specify the `migration` option.__
+	__Required if you specify the `migrations` option.__
 
 	You can fetch the `version` field from package.json.
 	*/
@@ -172,11 +172,24 @@ export type Options<T extends Record<string, unknown>> = {
 
 	Its main use is for obscurity. If a user looks through the config directory and finds the config file, since it's just a JSON file, they may be tempted to modify it. By providing an encryption key, the file will be obfuscated, which should hopefully deter any users from doing so.
 
-	It also has the added bonus of ensuring the config file's integrity. If the file is changed in any way, the decryption will not work, in which case the store will just reset back to its default state.
+	When using `aes-256-gcm`, the config file is authenticated. If the file is changed in any way, the decryption will fail. With `aes-256-cbc` and `aes-256-ctr`, tampering can go undetected.
 
-	When specified, the store will be encrypted using the [`aes-256-cbc`](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation) encryption algorithm.
+	When specified, the store will be encrypted using the `encryptionAlgorithm` option (defaults to `aes-256-cbc`).
 	*/
 	encryptionKey?: string | Uint8Array | NodeJS.TypedArray | DataView;
+
+	/**
+	Encryption algorithm to use when `encryptionKey` is set.
+
+	Use `aes-256-gcm` if you want authentication, otherwise use `aes-256-cbc` or `aes-256-ctr`.
+
+	Changing `encryptionAlgorithm` will make existing encrypted data unreadable.
+
+	When using `aes-256-gcm` or `aes-256-ctr`, existing plaintext config files are not supported. Delete the config file or migrate it before enabling encryption. With `aes-256-cbc`, existing plaintext config files are still readable for backward compatibility.
+
+	@default 'aes-256-cbc'
+	*/
+	encryptionAlgorithm?: 'aes-256-cbc' | 'aes-256-gcm' | 'aes-256-ctr';
 
 	/**
 	Extension of the config file.
@@ -188,7 +201,7 @@ export type Options<T extends Record<string, unknown>> = {
 	fileExtension?: string;
 
 	/**
-	The config is cleared if reading the config file causes a `SyntaxError` (malformed JSON) or a schema validation error when using the `schema` option. This is a good behavior for unimportant data, as the config file is not intended to be hand-edited, so it usually means the config is corrupt and there's nothing the user can do about it anyway. However, if you let the user edit the config file directly, mistakes might happen and it could be more useful to throw an error when the config is invalid instead of clearing.
+	The config is cleared if reading the config file causes a `SyntaxError` (malformed JSON), a schema validation error when using the `schema` option, or a decryption failure when using `encryptionKey`. This is a good behavior for unimportant data, as the config file is not intended to be hand-edited, so it usually means the config is corrupt and there's nothing the user can do about it anyway. However, if you let the user edit the config file directly, mistakes might happen and it could be more useful to throw an error when the config is invalid instead of clearing.
 
 	@default false
 	*/

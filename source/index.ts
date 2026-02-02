@@ -38,7 +38,16 @@ import {
 	type Schema,
 } from './types.js';
 
-const encryptionAlgorithm = 'aes-256-cbc';
+type EncryptionAlgorithm = NonNullable<Options<Record<string, unknown>>['encryptionAlgorithm']>;
+
+const defaultEncryptionAlgorithm: EncryptionAlgorithm = 'aes-256-cbc';
+const supportedEncryptionAlgorithms = new Set<EncryptionAlgorithm>([
+	'aes-256-cbc',
+	'aes-256-gcm',
+	'aes-256-ctr',
+]);
+
+const isSupportedEncryptionAlgorithm = (value: unknown): value is EncryptionAlgorithm => typeof value === 'string' && supportedEncryptionAlgorithms.has(value as EncryptionAlgorithm);
 
 const createPlainObject = <T = Record<string, unknown>>(): T => Object.create(null);
 
@@ -66,6 +75,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	readonly events: EventTarget;
 	#validator?: AjvValidateFunction;
 	readonly #encryptionKey?: string | Uint8Array | NodeJS.TypedArray | DataView;
+	readonly #encryptionAlgorithm: EncryptionAlgorithm;
 	readonly #options: Readonly<Partial<Options<T>>>;
 	readonly #defaultValues: Partial<T> = {};
 	#isInMigration = false;
@@ -81,6 +91,7 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		this.#configureSerialization(options);
 		this.events = new EventTarget();
 		this.#encryptionKey = options.encryptionKey;
+		this.#encryptionAlgorithm = options.encryptionAlgorithm ?? defaultEncryptionAlgorithm;
 		this.path = this.#resolvePath(options);
 		this.#initializeStore(options);
 
@@ -327,12 +338,16 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 		try {
 			const data = fs.readFileSync(this.path, this.#encryptionKey ? null : 'utf8');
 			const dataString = this._decryptData(data);
-			const deserializedData = this._deserialize(dataString);
-			if (!this.#isInMigration) {
-				this._validate(deserializedData);
-			}
+			const parseStore = (value: string): T => {
+				const deserializedData = this._deserialize(value);
+				if (!this.#isInMigration) {
+					this._validate(deserializedData);
+				}
 
-			return Object.assign(createPlainObject(), deserializedData);
+				return Object.assign(createPlainObject(), deserializedData);
+			};
+
+			return parseStore(dataString);
 		} catch (error: unknown) {
 			if ((error as any)?.code === 'ENOENT') {
 				this._ensureDirectory();
@@ -348,6 +363,10 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 
 				// Handle schema validation errors (new behavior)
 				if (errorInstance.message?.startsWith('Config schema violation:')) {
+					return createPlainObject();
+				}
+
+				if (errorInstance.message === 'Failed to decrypt config data.') {
 					return createPlainObject();
 				}
 			}
@@ -410,31 +429,71 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	}
 
 	private _decryptData(data: string | Uint8Array): string {
-		if (!this.#encryptionKey) {
+		const encryptionKey = this.#encryptionKey;
+		if (!encryptionKey) {
 			return typeof data === 'string' ? data : uint8ArrayToString(data);
 		}
 
 		// Check if an initialization vector has been used to encrypt the data.
-		try {
-			const initializationVector = data.slice(0, 16);
-			const password = crypto.pbkdf2Sync(this.#encryptionKey, initializationVector, 10_000, 32, 'sha512');
+		const encryptionAlgorithm = this.#encryptionAlgorithm;
+		const authenticationTagLength = encryptionAlgorithm === 'aes-256-gcm' ? 16 : 0;
+		const separatorCodePoint = ':'.codePointAt(0);
+		const separatorByte = typeof data === 'string' ? data.codePointAt(16) : data[16];
+		const hasSeparator = separatorCodePoint !== undefined && separatorByte === separatorCodePoint;
+		if (!hasSeparator) {
+			if (encryptionAlgorithm === 'aes-256-cbc') {
+				return typeof data === 'string' ? data : uint8ArrayToString(data);
+			}
+
+			throw new Error('Failed to decrypt config data.');
+		}
+
+		const getEncryptedPayload = (dataUpdate: Uint8Array): {ciphertext: Uint8Array; authenticationTag?: Uint8Array} => {
+			if (authenticationTagLength === 0) {
+				return {ciphertext: dataUpdate};
+			}
+
+			const authenticationTagStart = dataUpdate.length - authenticationTagLength;
+			if (authenticationTagStart < 0) {
+				throw new Error('Invalid authentication tag length.');
+			}
+
+			return {
+				ciphertext: dataUpdate.slice(0, authenticationTagStart),
+				authenticationTag: dataUpdate.slice(authenticationTagStart),
+			};
+		};
+
+		const initializationVector = data.slice(0, 16);
+		const slice = data.slice(17);
+		const dataUpdate = typeof slice === 'string' ? stringToUint8Array(slice) : slice;
+
+		const decrypt = (salt: string | Uint8Array): string => {
+			const {ciphertext, authenticationTag} = getEncryptedPayload(dataUpdate);
+			const password = crypto.pbkdf2Sync(encryptionKey, salt, 10_000, 32, 'sha512');
 			const decipher = crypto.createDecipheriv(encryptionAlgorithm, password, initializationVector);
-			const slice = data.slice(17);
-			const dataUpdate = typeof slice === 'string' ? stringToUint8Array(slice) : slice;
-			return uint8ArrayToString(concatUint8Arrays([decipher.update(dataUpdate), decipher.final()]));
+
+			if (authenticationTag) {
+				(decipher as crypto.DecipherGCM).setAuthTag(authenticationTag);
+			}
+
+			return uint8ArrayToString(concatUint8Arrays([decipher.update(ciphertext), decipher.final()]));
+		};
+
+		try {
+			return decrypt(initializationVector);
 		} catch {
 			try {
 				// Fallback to legacy scheme (iv.toString() as salt)
-				const initializationVector = data.slice(0, 16);
-				const password = crypto.pbkdf2Sync(this.#encryptionKey, initializationVector.toString(), 10_000, 32, 'sha512');
-				const decipher = crypto.createDecipheriv(encryptionAlgorithm, password, initializationVector);
-				const slice = data.slice(17);
-				const dataUpdate = typeof slice === 'string' ? stringToUint8Array(slice) : slice;
-				return uint8ArrayToString(concatUint8Arrays([decipher.update(dataUpdate), decipher.final()]));
+				return decrypt(initializationVector.toString());
 			} catch {}
 		}
 
-		return typeof data === 'string' ? data : uint8ArrayToString(data);
+		if (encryptionAlgorithm === 'aes-256-cbc') {
+			return typeof data === 'string' ? data : uint8ArrayToString(data);
+		}
+
+		throw new Error('Failed to decrypt config data.');
 	}
 
 	private _handleStoreChange(callback: OnDidAnyChangeCallback<T>): Unsubscribe {
@@ -510,11 +569,19 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 	private _write(value: T): void {
 		let data: string | Uint8Array = this._serialize(value);
 
-		if (this.#encryptionKey) {
+		const encryptionKey = this.#encryptionKey;
+		if (encryptionKey) {
 			const initializationVector = crypto.randomBytes(16);
-			const password = crypto.pbkdf2Sync(this.#encryptionKey, initializationVector, 10_000, 32, 'sha512');
-			const cipher = crypto.createCipheriv(encryptionAlgorithm, password, initializationVector);
-			data = concatUint8Arrays([initializationVector, stringToUint8Array(':'), cipher.update(stringToUint8Array(data)), cipher.final()]);
+			const password = crypto.pbkdf2Sync(encryptionKey, initializationVector, 10_000, 32, 'sha512');
+			const cipher = crypto.createCipheriv(this.#encryptionAlgorithm, password, initializationVector);
+			const encryptedData = concatUint8Arrays([cipher.update(stringToUint8Array(data)), cipher.final()]);
+			const encryptedParts = [initializationVector, stringToUint8Array(':'), encryptedData];
+
+			if (this.#encryptionAlgorithm === 'aes-256-gcm') {
+				encryptedParts.push((cipher as crypto.CipherGCM).getAuthTag());
+			}
+
+			data = concatUint8Arrays(encryptedParts);
 		}
 
 		// Temporary workaround for Conf being packaged in a Ubuntu Snap app.
@@ -700,6 +767,12 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			configFileMode: 0o666,
 			...partialOptions,
 		};
+
+		options.encryptionAlgorithm ??= defaultEncryptionAlgorithm;
+
+		if (!isSupportedEncryptionAlgorithm(options.encryptionAlgorithm)) {
+			throw new TypeError(`The \`encryptionAlgorithm\` option must be one of: ${[...supportedEncryptionAlgorithms].join(', ')}`);
+		}
 
 		if (!options.cwd) {
 			if (!options.projectName) {

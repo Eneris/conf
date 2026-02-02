@@ -1,7 +1,8 @@
 /* eslint-disable no-new, @typescript-eslint/naming-convention */
 import {stringToUint8Array} from 'uint8array-extras';
 import {expectTypeOf} from 'expect-type';
-import Conf from '../source/index.js';
+import {temporaryDirectory} from 'tempy';
+import Conf, {type Options} from '../source/index.js';
 
 type UnicornFoo = {
 	foo: string;
@@ -14,13 +15,16 @@ type UnicornFoo = {
 };
 
 const typeTestProjectName = 'conf-type-tests';
+const typeTestDirectory = temporaryDirectory();
 
 const conf = new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: typeTestDirectory,
 	accessPropertiesByDotNotation: true,
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	defaults: {
 		foo: 'bar',
 		unicorn: false,
@@ -28,60 +32,86 @@ new Conf<UnicornFoo>({
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	configName: '',
 });
-new Conf<UnicornFoo>({projectName: 'foo'});
+new Conf<UnicornFoo>({
+	projectName: 'foo',
+	cwd: temporaryDirectory(),
+});
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
 	cwd: '',
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	encryptionKey: '',
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	encryptionKey: stringToUint8Array(''),
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	encryptionKey: new Uint8Array([1]),
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	encryptionKey: new DataView(new ArrayBuffer(2)),
 });
+const encryptionAlgorithmOptions = {
+	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
+	encryptionKey: 'secret',
+	encryptionAlgorithm: 'aes-256-gcm',
+} satisfies Options<UnicornFoo>;
+void encryptionAlgorithmOptions;
+type EncryptionAlgorithmOption = Options<UnicornFoo>['encryptionAlgorithm'];
+// @ts-expect-error - `encryptionAlgorithm` must be a supported value
+const invalidEncryptionAlgorithm: EncryptionAlgorithmOption = 'aes-256-foo';
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	fileExtension: '.foo',
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	configFileMode: 0o600,
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	clearInvalidConfig: false,
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	serialize: () => 'foo',
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	deserialize: () => ({foo: 'foo', unicorn: true}),
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	projectSuffix: 'foo',
 });
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	watch: true,
 });
 
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
+	cwd: temporaryDirectory(),
 	schema: {
 		foo: {
 			type: 'string',

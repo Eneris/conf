@@ -1,6 +1,8 @@
 import process from 'node:process';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import {Buffer} from 'node:buffer';
 import {temporaryDirectory} from 'tempy';
 import {deleteSync} from 'del';
 import Conf from '../source/index.js';
@@ -9,6 +11,8 @@ const scheduledCleanups = new Set<string>();
 const pendingCleanups = new Set<() => void>();
 const trackedConfs = new Set<Conf>();
 let projectNameSequence = 0;
+const encryptionInitializationVectorLength = 16;
+const encryptionSeparatorCharacter = ':';
 
 process.on('exit', () => {
 	for (const directory of scheduledCleanups) {
@@ -100,6 +104,24 @@ export function createMigrationTest(options: MigrationTestOptions): {
 
 	return {conf, cwd, configPath};
 }
+
+export const writeLegacyEncryptedConfig = ({
+	filePath,
+	encryptionKey,
+	value,
+}: {
+	filePath: string;
+	encryptionKey: string;
+	value: Record<string, unknown>;
+}): void => {
+	const initializationVector = crypto.randomBytes(encryptionInitializationVectorLength);
+	const password = crypto.pbkdf2Sync(encryptionKey, initializationVector.toString(), 10_000, 32, 'sha512');
+	const cipher = crypto.createCipheriv('aes-256-cbc', password, initializationVector);
+	const serialized = JSON.stringify(value, undefined, '\t');
+	const encryptedData = Buffer.concat([cipher.update(Buffer.from(serialized)), cipher.final()]);
+	const data = Buffer.concat([initializationVector, Buffer.from(encryptionSeparatorCharacter), encryptedData]);
+	fs.writeFileSync(filePath, data);
+};
 
 export const nextProjectName = (): string => {
 	projectNameSequence++;

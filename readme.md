@@ -65,7 +65,7 @@ Type: `object`
 
 [JSON Schema](https://json-schema.org) to validate your config data.
 
-This will be the [`properties`](https://json-schema.org/understanding-json-schema/reference/object.html#properties) object of the JSON schema. That is, define `schema` as an object where each key is the name of your data's property and each value is a JSON schema used to validate that property. 
+This will be the [`properties`](https://json-schema.org/understanding-json-schema/reference/object.html#properties) object of the JSON schema. That is, define `schema` as an object where each key is the name of your data's property and each value is a JSON schema used to validate that property.
 
 Example:
 
@@ -263,7 +263,7 @@ const config = new Conf({projectName: packageJson.name});
 
 Type: `string`
 
-**Required if you specify the `migration` option.**
+**Required if you specify the `migrations` option.**
 
 You can fetch the `version` field from package.json.
 
@@ -288,7 +288,22 @@ Default: `undefined`
 
 Its main use is for obscurity. If a user looks through the config directory and finds the config file, since it's just a JSON file, they may be tempted to modify it. By providing an encryption key, the file will be obfuscated, which should hopefully deter any users from doing so.
 
-When specified, the store will be encrypted using the [`aes-256-cbc`](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation) encryption algorithm.
+When using `aes-256-gcm`, the config file is authenticated. If the file is changed in any way, the decryption will fail. With `aes-256-cbc` and `aes-256-ctr`, tampering can go undetected.
+
+When specified, the store will be encrypted using the `encryptionAlgorithm` option (defaults to `aes-256-cbc`).
+
+#### encryptionAlgorithm
+
+Type: `'aes-256-cbc' | 'aes-256-gcm' | 'aes-256-ctr'`\
+Default: `'aes-256-cbc'`
+
+Encryption algorithm to use when `encryptionKey` is set.
+
+Use `aes-256-gcm` if you want authentication, otherwise use `aes-256-cbc` or `aes-256-ctr`.
+
+Changing `encryptionAlgorithm` will make existing encrypted data unreadable.
+
+When using `aes-256-gcm` or `aes-256-ctr`, existing plaintext config files are not supported. Delete the config file or migrate it before enabling encryption. With `aes-256-cbc`, existing plaintext config files are still readable for backward compatibility.
 
 #### fileExtension
 
@@ -304,7 +319,7 @@ You would usually not need this, but could be useful if you want to interact wit
 Type: `boolean`\
 Default: `false`
 
-The config is cleared if reading the config file causes a `SyntaxError` (malformed JSON) or a schema validation error when using the `schema` option. This is a good behavior for unimportant data, as the config file is not intended to be hand-edited, so it usually means the config is corrupt and there's nothing the user can do about it anyway. However, if you let the user edit the config file directly, mistakes might happen and it could be more useful to throw an error when the config is invalid instead of clearing.
+The config is cleared if reading the config file causes a `SyntaxError` (malformed JSON), a schema validation error when using the `schema` option, or a decryption failure when using `encryptionKey`. This is a good behavior for unimportant data, as the config file is not intended to be hand-edited, so it usually means the config is corrupt and there's nothing the user can do about it anyway. However, if you let the user edit the config file directly, mistakes might happen and it could be more useful to throw an error when the config is invalid instead of clearing.
 
 #### serialize
 
