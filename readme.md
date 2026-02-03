@@ -276,6 +276,8 @@ Default: System default [user config directory](https://github.com/sindresorhus/
 
 Overrides `projectName`.
 
+By default the config is stored in the [system user's config directory](https://github.com/sindresorhus/env-paths#pathsconfig); running under another user reads a different store. Set `cwd` to share across users.
+
 The only use-case I can think of is having the config located in the app directory or on some external storage.
 
 #### encryptionKey
