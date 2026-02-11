@@ -3,7 +3,6 @@ import {isDeepStrictEqual} from 'node:util';
 import process from 'node:process';
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import assert from 'node:assert';
 import {
 	getProperty,
@@ -865,12 +864,6 @@ export default class Conf<T extends Record<string, any> = Record<string, unknown
 			writeTimeout: 0,
 			...partialOptions,
 		};
-
-		options.encryptionAlgorithm ??= defaultEncryptionAlgorithm;
-
-		if (!isSupportedEncryptionAlgorithm(options.encryptionAlgorithm)) {
-			throw new TypeError(`The \`encryptionAlgorithm\` option must be one of: ${[...supportedEncryptionAlgorithms].join(', ')}`);
-		}
 
 		if (!options.cwd) {
 			if (!options.projectName) {

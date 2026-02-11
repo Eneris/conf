@@ -1,7 +1,7 @@
 /* eslint-disable no-new, @typescript-eslint/naming-convention */
 import {expectTypeOf} from 'expect-type';
 import {temporaryDirectory} from 'tempy';
-import Conf, {type Options} from '../source/index.js';
+import Conf from '../source/index.js';
 
 type UnicornFoo = {
 	foo: string;
@@ -54,16 +54,6 @@ new Conf<UnicornFoo>({
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
 });
-const encryptionAlgorithmOptions = {
-	projectName: typeTestProjectName,
-	cwd: temporaryDirectory(),
-	encryptionKey: 'secret',
-	encryptionAlgorithm: 'aes-256-gcm',
-} satisfies Options<UnicornFoo>;
-void encryptionAlgorithmOptions;
-type EncryptionAlgorithmOption = Options<UnicornFoo>['encryptionAlgorithm'];
-// @ts-expect-error - `encryptionAlgorithm` must be a supported value
-const invalidEncryptionAlgorithm: EncryptionAlgorithmOption = 'aes-256-foo';
 new Conf<UnicornFoo>({
 	projectName: typeTestProjectName,
 	cwd: temporaryDirectory(),

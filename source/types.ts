@@ -179,19 +179,6 @@ export type Options<T extends Record<string, unknown>> = {
 	};
 
 	/**
-	Encryption algorithm to use when `encryptionKey` is set.
-
-	Use `aes-256-gcm` if you want authentication, otherwise use `aes-256-cbc` or `aes-256-ctr`.
-
-	Changing `encryptionAlgorithm` will make existing encrypted data unreadable.
-
-	When using `aes-256-gcm` or `aes-256-ctr`, existing plaintext config files are not supported. Delete the config file or migrate it before enabling encryption. With `aes-256-cbc`, existing plaintext config files are still readable for backward compatibility.
-
-	@default 'aes-256-cbc'
-	*/
-	encryptionAlgorithm?: 'aes-256-cbc' | 'aes-256-gcm' | 'aes-256-ctr';
-
-	/**
 	Extension of the config file.
 
 	You would usually not need this, but could be useful if you want to interact with a file with a custom file extension that can be associated with your app. These might be simple save/export/preference files that are intended to be shareable or saved outside of the app.
@@ -201,7 +188,7 @@ export type Options<T extends Record<string, unknown>> = {
 	fileExtension?: string;
 
 	/**
-	The config is cleared if reading the config file causes a `SyntaxError` (malformed JSON), a schema validation error when using the `schema` option, or a decryption failure when using `encryptionKey`. This is a good behavior for unimportant data, as the config file is not intended to be hand-edited, so it usually means the config is corrupt and there's nothing the user can do about it anyway. However, if you let the user edit the config file directly, mistakes might happen and it could be more useful to throw an error when the config is invalid instead of clearing.
+	The config is cleared if reading the config file causes a `SyntaxError` (malformed JSON), a schema validation error when using the `schema` option, or a decryption failure when using `encryption`. This is a good behavior for unimportant data, as the config file is not intended to be hand-edited, so it usually means the config is corrupt and there's nothing the user can do about it anyway. However, if you let the user edit the config file directly, mistakes might happen and it could be more useful to throw an error when the config is invalid instead of clearing.
 
 	@default false
 	*/
